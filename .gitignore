@@ -1,0 +1,18 @@
+# runtime / local
+out/
+uploads/
+runs/
+__pycache__/
+*.pyc
+.Python
+.venv/
+venv/
+.DS_Store
+
+# model weights (download separately)
+*.pt
+*.pth
+*.onnx
+weights/
+models/
+yolov8*.pt

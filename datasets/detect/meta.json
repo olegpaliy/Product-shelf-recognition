@@ -1,0 +1,21 @@
+{
+  "sources": [
+    {
+      "stem": "xo_napoi_hero",
+      "kind": "manual",
+      "n_boxes": 24
+    },
+    {
+      "stem": "xo_fridge_01_panel",
+      "kind": "cleaned",
+      "n_boxes": 3
+    },
+    {
+      "stem": "shelf_planogram_02",
+      "kind": "cleaned",
+      "n_boxes": 1
+    }
+  ],
+  "train": 23,
+  "val": 3
+}

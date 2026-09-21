@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Shelf XO Recognition PoC</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="header">
+      <div>
+        <p class="eyebrow">PoC · ХО / полиця</p>
+        <h1>Image Recognition</h1>
+        <p class="sub">Фото → QA → рамки → бренд → схема викладки → Excel</p>
+      </div>
+    </header>
+
+    <section id="screen-upload" class="panel">
+      <h2>1. Завантаження / демо</h2>
+      <div class="row">
+        <label class="btn">
+          Обрати фото
+          <input id="file-input" type="file" accept="image/*" hidden />
+        </label>
+        <button id="btn-analyze-upload" class="btn primary" disabled>Аналізувати upload</button>
+      </div>
+      <p id="upload-name" class="muted"></p>
+
+      <h3>Схема викладки (планограма)</h3>
+      <div class="planogram-box">
+        <label class="field">
+          <span>Режим</span>
+          <select id="planogram-select"></select>
+        </label>
+        <label class="field">
+          <span>Expected бренди (для Custom, через кому)</span>
+          <input id="expected-brands" type="text" placeholder="morshynska, coca-cola, pepsi" />
+        </label>
+        <p class="muted small">
+          Auto: якщо є <code>planograms/&lt;імʼя-фото&gt;.json</code> — бере його, інакше Missing не рахує.
+          Upload чужого фото за замовчуванням без чужої схеми.
+        </p>
+      </div>
+
+      <h3>Або sample</h3>
+      <div id="samples" class="samples"></div>
+      <button id="btn-analyze-sample" class="btn primary" disabled>Аналізувати sample</button>
+      <div id="progress" class="progress hidden">Аналіз… це може зайняти хвилину на CPU</div>
+      <p id="error" class="error"></p>
+    </section>
+
+    <section id="screen-result" class="panel hidden">
+      <div class="row between">
+        <h2>2. Результат</h2>
+        <button id="btn-back" class="btn">← Інше фото</button>
+      </div>
+
+      <div class="grid">
+        <div>
+          <img id="annotated" alt="Annotated result" class="annotated" />
+        </div>
+        <div class="meta">
+          <div id="qa-badge" class="badge"></div>
+          <div id="cache-badge" class="badge hidden"></div>
+          <p><strong>Схема:</strong> <span id="plan-source">—</span></p>
+          <p><strong>Детекцій:</strong> <span id="det-count">—</span></p>
+          <p><strong>Compliance:</strong> <span id="compliance">—</span></p>
+          <p><strong>Missing:</strong> <span id="missing">—</span></p>
+          <p><strong>Competitor:</strong> <span id="competitor">—</span></p>
+          <h3>Доля полиці</h3>
+          <ul id="share-list"></ul>
+          <h3>Ряди</h3>
+          <ul id="shelf-list"></ul>
+          <div class="row">
+            <a id="dl-excel" class="btn primary" href="#">Excel</a>
+            <a id="dl-json" class="btn" href="#">JSON</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>

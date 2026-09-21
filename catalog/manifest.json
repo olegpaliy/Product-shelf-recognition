@@ -1,0 +1,35 @@
+{
+  "method": "openclip_text_autoseed",
+  "min_score": 0.2,
+  "margin": 0.015,
+  "per_brand": 10,
+  "brands": {
+    "lipton": 10,
+    "pepsi": 10,
+    "coca-cola": 10,
+    "fanta": 7,
+    "sprite": 10,
+    "bonaqua": 10,
+    "monster": 5,
+    "schweppes": 5
+  },
+  "napoi_hero_manual": {
+    "red-bull": 2,
+    "monster": 2,
+    "fanta": 3,
+    "coca-cola": 3,
+    "sprite": 2,
+    "schweppes": 3,
+    "morshynska": 4,
+    "voda": 3,
+    "juice": 2
+  },
+  "shelf_planogram_02_manual": {
+    "coca-cola": 5,
+    "monster": 1,
+    "fanta": 5,
+    "pepsi": 4,
+    "lipton": 2,
+    "sprite": 3
+  }
+}

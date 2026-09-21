@@ -1,0 +1,12 @@
+{
+  "id": "xo_napoi_hero",
+  "name": "XO napoi hero fridge",
+  "own_brands": ["coca-cola", "fanta", "sprite", "schweppes", "morshynska"],
+  "shelves": {
+    "shelf_1": ["red-bull", "monster", "fanta"],
+    "shelf_2": ["coca-cola", "sprite", "schweppes"],
+    "shelf_3": ["morshynska", "voda"],
+    "shelf_4": ["juice"]
+  },
+  "notes": "Only for samples/xo_napoi_hero.jpg"
+}
