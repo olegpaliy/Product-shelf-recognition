@@ -16,8 +16,8 @@ EXPORT = ROOT / "models" / "sku110k" / "sku110k-finetuned.pt"
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Fine-tune product detector on sample dataset")
-    parser.add_argument("--epochs", type=int, default=40)
-    parser.add_argument("--imgsz", type=int, default=960)
+    parser.add_argument("--epochs", type=int, default=25)
+    parser.add_argument("--imgsz", type=int, default=640)
     parser.add_argument("--batch", type=int, default=4)
     parser.add_argument("--device", default="mps")  # Apple Silicon; use cpu if needed
     parser.add_argument("--data", type=Path, default=DATA)
@@ -39,8 +39,8 @@ def main() -> None:
         project=str(RUNS),
         name="finetune",
         exist_ok=True,
-        patience=12,
-        close_mosaic=8,
+        patience=8,
+        close_mosaic=6,
         hsv_h=0.015,
         hsv_s=0.5,
         hsv_v=0.3,

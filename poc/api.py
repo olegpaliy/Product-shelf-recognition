@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .brand import BrandMatcher
+from .detect import default_detector_weights
 from .pipeline import ROOT, analyze_image
 from .planogram_select import list_planograms
 
@@ -20,7 +21,7 @@ OUT_DIR = ROOT / "out"
 WEB_DIR = ROOT / "web"
 UPLOADS_DIR = OUT_DIR / "uploads"
 
-app = FastAPI(title="Shelf XO Recognition PoC", version="0.4.0")
+app = FastAPI(title="Shelf XO Recognition PoC", version="0.6.0")
 _matcher: Optional[BrandMatcher] = None
 
 
@@ -39,9 +40,12 @@ def reset_matcher() -> None:
 
 @app.get("/api/health")
 def health():
+    weights = default_detector_weights()
     return {
         "ok": True,
-        "version": "0.4.0",
+        "version": "0.6.0",
+        "detector": "sku110k",
+        "detector_weights": weights,
         "brand_backend": "siglip2",
         "brand_model": "google/siglip2-base-patch16-224",
         "catalog_brands": get_matcher().brands,

@@ -11,7 +11,15 @@ import cv2
 import numpy as np
 
 from .crop_napoi_hero import CROPS as NAPOI_CROPS
-from .detect import Detection, detect_products, draw_detections, ensure_sku110k_weights
+from .crop_shelf_catalog import CROPS as SHELF_CROPS
+from .detect import (
+    Detection,
+    crop_fridge_panel,
+    default_detector_weights,
+    detect_products,
+    draw_detections,
+    ensure_sku110k_weights,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 SAMPLES = ROOT / "samples"
@@ -55,9 +63,28 @@ def dets_to_boxes(dets: List[Detection]) -> List[Box]:
     return [(d.x1, d.y1, d.x2, d.y2) for d in dets]
 
 
-def crop_fridge_panel(img: np.ndarray) -> Tuple[np.ndarray, int]:
-    x0 = int(0.34 * img.shape[1])
-    return img[:, x0:], x0
+def shelf_boxes(w: int, h: int) -> List[Box]:
+    """Seed boxes from hand brand crops, then densify with SKU-110K."""
+    out = []
+    for _, x1, y1, x2, y2 in SHELF_CROPS:
+        b = _clip(x1 - 2, y1 - 2, x2 + 2, y2 + 2, w, h)
+        if b:
+            out.append(b)
+    return out
+
+
+def clean_dets(dets: List[Detection], min_conf: float = 0.28) -> List[Box]:
+    kept = [d for d in dets if d.confidence >= min_conf]
+    return dets_to_boxes(kept)
+
+
+def merge_boxes(a: Sequence[Box], b: Sequence[Box], iou_thresh: float = 0.45) -> List[Box]:
+    dets = [
+        Detection(x1, y1, x2, y2, 1.0, 0, "product") for x1, y1, x2, y2 in list(a) + list(b)
+    ]
+    from .detect import _nms
+
+    return dets_to_boxes(_nms(dets, iou_thresh=iou_thresh))
 
 
 def make_tiles(
@@ -98,7 +125,9 @@ def save_pair(img_dir: Path, lbl_dir: Path, stem: str, image: np.ndarray, boxes:
 
 
 def main() -> None:
-    ensure_sku110k_weights()
+    weights = str(ensure_sku110k_weights())
+    # Prefer base SKU-110K for pseudo-labels (not a previous broken fine-tune)
+    print(f"pseudo-label weights: {weights} (runtime default would be {default_detector_weights()})")
     if OUT.exists():
         shutil.rmtree(OUT)
     train_img, train_lbl = OUT / "images" / "train", OUT / "labels" / "train"
@@ -111,18 +140,30 @@ def main() -> None:
     hero = cv2.imread(str(SAMPLES / "xo_napoi_hero.jpg"))
     assert hero is not None
     hh, hw = hero.shape[:2]
-    sources.append(("xo_napoi_hero", hero, napoi_boxes(hw, hh), "manual"))
+    # Manual boxes + densify with detector
+    hero_auto = clean_dets(
+        detect_products(hero, conf=0.22, imgsz=960, weights=weights, retail_only=False)
+    )
+    sources.append(
+        ("xo_napoi_hero", hero, merge_boxes(napoi_boxes(hw, hh), hero_auto), "manual+sku")
+    )
 
     fridge_full = cv2.imread(str(SAMPLES / "xo_fridge_01.jpg"))
     if fridge_full is not None:
         panel, _ = crop_fridge_panel(fridge_full)
-        boxes = dets_to_boxes(detect_products(panel, conf=0.14, imgsz=1280))
-        sources.append(("xo_fridge_01_panel", panel, boxes, "cleaned"))
+        boxes = clean_dets(
+            detect_products(panel, conf=0.22, imgsz=960, weights=weights, retail_only=False)
+        )
+        sources.append(("xo_fridge_01_panel", panel, boxes, "sku110k"))
 
     shelf = cv2.imread(str(SAMPLES / "shelf_planogram_02.jpg"))
     if shelf is not None:
-        boxes = dets_to_boxes(detect_products(shelf, conf=0.14, imgsz=1280))
-        sources.append(("shelf_planogram_02", shelf, boxes, "cleaned"))
+        sh, sw = shelf.shape[:2]
+        auto = clean_dets(
+            detect_products(shelf, conf=0.22, imgsz=960, weights=weights, retail_only=False)
+        )
+        boxes = merge_boxes(shelf_boxes(sw, sh), auto)
+        sources.append(("shelf_planogram_02", shelf, boxes, "manual+sku"))
 
     records = []
     meta = []

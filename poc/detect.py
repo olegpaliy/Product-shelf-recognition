@@ -1,17 +1,22 @@
-"""YOLO product detection (COCO bottle-related classes + fallback)."""
+"""YOLO product detection — default SKU-110K retail weights + optional fine-tune."""
 
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Tuple
 
 import cv2
 import numpy as np
 
+ROOT = Path(__file__).resolve().parents[1]
+SKU110K_DIR = ROOT / "models" / "sku110k"
+SKU110K_BASE = SKU110K_DIR / "sku110k-yolo11-s640.pt"
+SKU110K_FINETUNED = SKU110K_DIR / "sku110k-finetuned.pt"
+
 # COCO classes that often appear on beverage shelves
 RETAIL_CLASS_IDS = {39, 40, 41, 46, 47}  # bottle, wine glass, cup, banana, apple (loose)
-RETAIL_CLASS_NAMES = {"bottle", "wine glass", "cup", "can"}
+RETAIL_CLASS_NAMES = {"bottle", "wine glass", "cup", "can", "object", "product"}
 
 
 @dataclass
@@ -45,15 +50,56 @@ class Detection:
 
 
 _model = None
+_model_weights: Optional[str] = None
 
 
-def get_model(weights: str = "yolov8n.pt"):
-    global _model
-    if _model is None:
+def ensure_sku110k_weights() -> Path:
+    """Return path to base SKU-110K YOLO11s weights (must already be on disk)."""
+    if SKU110K_BASE.exists():
+        return SKU110K_BASE
+    raise FileNotFoundError(
+        f"Missing {SKU110K_BASE}. Place sku110k-yolo11-s640.pt under models/sku110k/"
+    )
+
+
+def default_detector_weights() -> str:
+    """Prefer fine-tuned sample weights, else SKU-110K base."""
+    if SKU110K_FINETUNED.exists():
+        return str(SKU110K_FINETUNED)
+    if SKU110K_BASE.exists():
+        return str(SKU110K_BASE)
+    return "yolov8n.pt"
+
+
+def get_model(weights: Optional[str] = None):
+    global _model, _model_weights
+    path = str(weights or default_detector_weights())
+    if _model is None or _model_weights != path:
         from ultralytics import YOLO
 
-        _model = YOLO(weights)
+        _model = YOLO(path)
+        _model_weights = path
     return _model
+
+
+def reset_model() -> None:
+    global _model, _model_weights
+    _model = None
+    _model_weights = None
+
+
+def crop_fridge_panel(image_bgr: np.ndarray) -> Tuple[np.ndarray, int]:
+    """Keep cooler half of marketing-slide samples (UI strip on the left)."""
+    x0 = int(0.34 * image_bgr.shape[1])
+    return image_bgr[:, x0:], x0
+
+
+def maybe_crop_product_roi(
+    image_bgr: np.ndarray, stem: Optional[str] = None
+) -> Tuple[np.ndarray, int]:
+    if stem and "fridge" in stem.lower():
+        return crop_fridge_panel(image_bgr)
+    return image_bgr, 0
 
 
 def _nms(dets: List[Detection], iou_thresh: float = 0.45) -> List[Detection]:
@@ -123,13 +169,16 @@ def detect_by_columns(image_bgr: np.ndarray) -> List[Detection]:
 def detect_products(
     image_bgr: np.ndarray,
     *,
-    conf: float = 0.15,
-    imgsz: int = 640,
-    weights: str = "yolov8n.pt",
+    conf: float = 0.2,
+    imgsz: int = 960,
+    weights: Optional[str] = None,
     retail_only: bool = True,
 ) -> List[Detection]:
-    """Run YOLO and return product-like boxes; merge column heuristic if sparse."""
-    model = get_model(weights)
+    """Run retail detector and return product-like boxes; merge column heuristic if sparse."""
+    wpath = weights or default_detector_weights()
+    model = get_model(wpath)
+    # Single-class retail checkpoints (SKU-110K) — keep all classes
+    is_retail_ckpt = "sku110k" in Path(wpath).name.lower()
     results = model.predict(
         source=image_bgr,
         conf=conf,
@@ -147,6 +196,7 @@ def detect_products(
                 name = str(names.get(cls_id, cls_id))
                 if (
                     retail_only
+                    and not is_retail_ckpt
                     and cls_id not in RETAIL_CLASS_IDS
                     and name.lower() not in RETAIL_CLASS_NAMES
                 ):
@@ -165,15 +215,16 @@ def detect_products(
                 )
 
     # Dense shelves: widen to all COCO classes if too few retail hits
-    if retail_only and len(detections) < 5:
-        detections = detect_products(
+    if retail_only and not is_retail_ckpt and len(detections) < 5:
+        return detect_products(
             image_bgr,
             conf=conf,
             imgsz=imgsz,
-            weights=weights,
+            weights=wpath,
             retail_only=False,
         )
-        return detections
+
+    detections = _nms(detections, iou_thresh=0.5)
 
     if len(detections) < 12:
         detections = _nms(detections + detect_by_columns(image_bgr), iou_thresh=0.4)

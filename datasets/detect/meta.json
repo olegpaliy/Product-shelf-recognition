@@ -2,20 +2,20 @@
   "sources": [
     {
       "stem": "xo_napoi_hero",
-      "kind": "manual",
-      "n_boxes": 24
+      "kind": "manual+sku",
+      "n_boxes": 38
     },
     {
       "stem": "xo_fridge_01_panel",
-      "kind": "cleaned",
-      "n_boxes": 3
+      "kind": "sku110k",
+      "n_boxes": 64
     },
     {
       "stem": "shelf_planogram_02",
-      "kind": "cleaned",
-      "n_boxes": 1
+      "kind": "manual+sku",
+      "n_boxes": 201
     }
   ],
-  "train": 23,
+  "train": 35,
   "val": 3
 }

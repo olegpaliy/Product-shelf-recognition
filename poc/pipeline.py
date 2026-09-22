@@ -9,7 +9,13 @@ from typing import Any, Dict, List, Optional, Sequence
 import cv2
 
 from .brand import BrandMatcher, aggregate_brand_counts, brand_share
-from .detect import detect_products, draw_detections, save_annotated
+from .detect import (
+    default_detector_weights,
+    detect_products,
+    draw_detections,
+    maybe_crop_product_roi,
+    save_annotated,
+)
 from .planogram import compare_planogram
 from .planogram_select import empty_planogram_result, resolve_planogram
 from .qa import assess_photo
@@ -28,8 +34,9 @@ def analyze_image(
     expected_brands: Optional[Sequence[str]] = None,
     planogram_path: Optional[Path] = None,
     result_id: Optional[str] = None,
-    conf: float = 0.15,
-    imgsz: int = 640,
+    conf: float = 0.22,
+    imgsz: int = 960,
+    weights: Optional[str] = None,
     matcher: Optional[BrandMatcher] = None,
 ) -> Dict[str, Any]:
     image_path = Path(image_path)
@@ -45,7 +52,9 @@ def analyze_image(
         raise FileNotFoundError(f"Cannot read image: {image_path}")
 
     qa = assess_photo(image)
-    detections = detect_products(image, conf=conf, imgsz=imgsz)
+    image, crop_x0 = maybe_crop_product_roi(image, image_path.stem)
+    det_weights = weights or default_detector_weights()
+    detections = detect_products(image, conf=conf, imgsz=imgsz, weights=det_weights)
 
     catalog_dir = Path(catalog_dir or ROOT / "catalog")
     if matcher is None:
@@ -116,6 +125,10 @@ def analyze_image(
             "brightness": round(qa.brightness, 2),
         },
         "detection_count": len(detections),
+        "detector_weights": det_weights,
+        "detector_conf": conf,
+        "detector_imgsz": imgsz,
+        "roi_crop_x0": crop_x0,
         "brand_counts": counts,
         "brand_share": share,
         "shelf_summary": shelf_summary,

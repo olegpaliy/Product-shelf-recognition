@@ -37,8 +37,8 @@ def main(argv: list[str] | None = None) -> None:
         default="auto",
         help="auto|none|custom|<id> when --planogram file is not set",
     )
-    parser.add_argument("--conf", type=float, default=0.15)
-    parser.add_argument("--imgsz", type=int, default=640)
+    parser.add_argument("--conf", type=float, default=0.22)
+    parser.add_argument("--imgsz", type=int, default=960)
     args = parser.parse_args(argv)
 
     images = collect_images(args.input)
