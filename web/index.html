@@ -3,82 +3,112 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Shelf XO Recognition PoC</title>
+  <title>ХО · Image Recognition</title>
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
-  <div class="page">
-    <header class="header">
-      <div>
-        <p class="eyebrow">PoC · ХО / полиця</p>
-        <h1>Image Recognition</h1>
-        <p class="sub">Фото → QA → рамки → бренд → схема викладки → Excel</p>
-      </div>
-    </header>
+  <div class="app-shell">
+    <aside class="side-nav" aria-label="Модулі">
+      <button type="button" class="nav-item" data-nav="share" data-target="panel-share" disabled>
+        Нумерична дистрибуція
+      </button>
+      <button type="button" class="nav-item" data-nav="details" data-target="panel-shelves" disabled>
+        Нумерична дистрибуція (деталі)
+      </button>
+      <button type="button" class="nav-item active" data-nav="planogram" data-target="panel-cooler">
+        Планограма ХО
+      </button>
+      <button type="button" class="nav-item" data-nav="missing" data-target="panel-missing" disabled>
+        SKU не в планограмі
+      </button>
+      <button type="button" class="nav-item" data-nav="competitor" data-target="panel-competitor" disabled>
+        Конкурент в ХО
+      </button>
+      <button type="button" class="nav-item" data-nav="visits" data-target="panel-qa">
+        Розрахунок % візитів з фото і валідних фото
+      </button>
+    </aside>
 
-    <section id="screen-upload" class="panel">
-      <h2>1. Завантаження / демо</h2>
-      <div class="row">
-        <label class="btn">
-          Обрати фото
-          <input id="file-input" type="file" accept="image/*" hidden />
-        </label>
-        <button id="btn-analyze-upload" class="btn primary" disabled>Аналізувати upload</button>
-      </div>
-      <p id="upload-name" class="muted"></p>
-
-      <h3>Схема викладки (планограма)</h3>
-      <div class="planogram-box">
-        <label class="field">
-          <span>Режим</span>
-          <select id="planogram-select"></select>
-        </label>
-        <label class="field">
-          <span>Expected бренди (для Custom, через кому)</span>
-          <input id="expected-brands" type="text" placeholder="morshynska, coca-cola, pepsi" />
-        </label>
-        <p class="muted small">
-          Auto: якщо є <code>planograms/&lt;імʼя-фото&gt;.json</code> — бере його, інакше Missing не рахує.
-          Upload чужого фото за замовчуванням без чужої схеми.
-        </p>
-      </div>
-
-      <h3>Або sample</h3>
-      <div id="samples" class="samples"></div>
-      <button id="btn-analyze-sample" class="btn primary" disabled>Аналізувати sample</button>
-      <div id="progress" class="progress hidden">Аналіз… це може зайняти хвилину на CPU</div>
-      <p id="error" class="error"></p>
-    </section>
-
-    <section id="screen-result" class="panel hidden">
-      <div class="row between">
-        <h2>2. Результат</h2>
-        <button id="btn-back" class="btn">← Інше фото</button>
-      </div>
-
-      <div class="grid">
+    <main class="main">
+      <header class="topbar">
         <div>
-          <img id="annotated" alt="Annotated result" class="annotated" />
+          <p class="eyebrow">PoC · ХО / полиця</p>
+          <h1>Планограма ХО</h1>
         </div>
-        <div class="meta">
-          <div id="qa-badge" class="badge"></div>
-          <div id="cache-badge" class="badge hidden"></div>
-          <p><strong>Схема:</strong> <span id="plan-source">—</span></p>
-          <p><strong>Детекцій:</strong> <span id="det-count">—</span></p>
-          <p><strong>Compliance:</strong> <span id="compliance">—</span></p>
-          <p><strong>Missing:</strong> <span id="missing">—</span></p>
-          <p><strong>Competitor:</strong> <span id="competitor">—</span></p>
-          <h3>Доля полиці</h3>
-          <ul id="share-list"></ul>
-          <h3>Ряди</h3>
-          <ul id="shelf-list"></ul>
+        <button id="btn-back" class="btn outline hidden" type="button">← Інше фото</button>
+      </header>
+
+      <section id="screen-upload" class="screen">
+        <div class="card">
+          <h2>Фото для аналізу</h2>
           <div class="row">
-            <a id="dl-excel" class="btn primary" href="#">Excel</a>
-            <a id="dl-json" class="btn" href="#">JSON</a>
+            <label class="btn primary">
+              Обрати фото
+              <input id="file-input" type="file" accept="image/*" hidden />
+            </label>
+            <button id="btn-analyze" class="btn primary" type="button" disabled>Аналізувати</button>
           </div>
+          <p id="upload-name" class="muted"></p>
+
+          <h3>Або sample</h3>
+          <div id="samples" class="samples"></div>
+          <div id="progress" class="progress hidden">Аналіз… це може зайняти хвилину на CPU</div>
+          <p id="error" class="error"></p>
         </div>
-      </div>
-    </section>
+      </section>
+
+      <section id="screen-result" class="screen hidden">
+        <div class="result-layout">
+          <div class="photo-col">
+            <img id="annotated" alt="Annotated result" class="annotated" />
+          </div>
+
+          <aside class="side-panels">
+            <div id="panel-cooler" class="card metric-panel highlight-target">
+              <div class="panel-head">
+                <h2>Планограма ХО</h2>
+                <span id="compliance" class="metric-pill">—</span>
+              </div>
+              <p class="muted small"><strong>Схема:</strong> <span id="plan-source">—</span></p>
+              <div id="cooler" class="cooler" aria-label="Схематичний холодильник"></div>
+            </div>
+
+            <div id="panel-qa" class="card metric-panel highlight-target">
+              <h3>Фото / візит</h3>
+              <div class="badge-row">
+                <div id="qa-badge" class="badge"></div>
+              </div>
+              <p><strong>Детекцій:</strong> <span id="det-count">—</span></p>
+            </div>
+
+            <div id="panel-missing" class="card metric-panel highlight-target">
+              <h3>SKU не в планограмі</h3>
+              <p id="missing" class="metric-value">—</p>
+            </div>
+
+            <div id="panel-competitor" class="card metric-panel highlight-target">
+              <h3>Конкурент в ХО</h3>
+              <p id="competitor" class="metric-value">—</p>
+            </div>
+
+            <div id="panel-share" class="card metric-panel highlight-target">
+              <h3>Нумерична дистрибуція</h3>
+              <ul id="share-list"></ul>
+            </div>
+
+            <div id="panel-shelves" class="card metric-panel highlight-target">
+              <h3>Дистрибуція (деталі)</h3>
+              <ul id="shelf-list"></ul>
+            </div>
+
+            <div class="row exports">
+              <a id="dl-excel" class="btn primary" href="#">Excel</a>
+              <a id="dl-json" class="btn outline" href="#">JSON</a>
+            </div>
+          </aside>
+        </div>
+      </section>
+    </main>
   </div>
   <script src="/app.js"></script>
 </body>
