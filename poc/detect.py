@@ -166,6 +166,28 @@ def detect_by_columns(image_bgr: np.ndarray) -> List[Detection]:
     return _nms(dets, iou_thresh=0.35)
 
 
+def _looks_like_fan_or_fixture(det: Detection, h: int, w: int) -> bool:
+    """Reject cooler fan grills / top fixtures mistaken for SKUs."""
+    cy_n = det.cy / max(h, 1)
+    cx_n = det.cx / max(w, 1)
+    aspect = det.height / max(det.width, 1.0)
+    width_n = det.width / max(w, 1)
+    # Circular/square object high and relatively wide (fan grill)
+    if cy_n < 0.14 and 0.55 <= aspect <= 1.55 and width_n >= 0.07:
+        return True
+    # Tiny lone blob glued to the very top center
+    if cy_n < 0.08 and 0.35 <= cx_n <= 0.65 and width_n >= 0.05 and aspect < 1.8:
+        return True
+    # Very top wide/flat box (fan often boxed as a squat rectangle)
+    if cy_n < 0.10 and aspect < 0.85 and width_n >= 0.08 and 0.25 <= cx_n <= 0.75:
+        return True
+    return False
+
+
+def _filter_non_products(dets: List[Detection], h: int, w: int) -> List[Detection]:
+    return [d for d in dets if not _looks_like_fan_or_fixture(d, h, w)]
+
+
 def detect_products(
     image_bgr: np.ndarray,
     *,
@@ -175,6 +197,7 @@ def detect_products(
     retail_only: bool = True,
 ) -> List[Detection]:
     """Run retail detector and return product-like boxes; merge column heuristic if sparse."""
+    h, w = image_bgr.shape[:2]
     wpath = weights or default_detector_weights()
     model = get_model(wpath)
     # Single-class retail checkpoints (SKU-110K) — keep all classes
@@ -229,6 +252,7 @@ def detect_products(
     if len(detections) < 12:
         detections = _nms(detections + detect_by_columns(image_bgr), iou_thresh=0.4)
 
+    detections = _filter_non_products(detections, h, w)
     detections.sort(key=lambda d: (d.cy, d.cx))
     return detections
 
