@@ -14,7 +14,6 @@ from fastapi.staticfiles import StaticFiles
 from .brand import BrandMatcher
 from .detect import default_detector_weights
 from .pipeline import ROOT, analyze_image
-from .planogram_select import list_planograms
 
 SAMPLES_DIR = ROOT / "samples"
 OUT_DIR = ROOT / "out"
@@ -32,13 +31,6 @@ def get_matcher() -> BrandMatcher:
     return _matcher
 
 
-def reset_matcher() -> None:
-    """Force reload after catalog refresh."""
-    global _matcher
-    _matcher = None
-
-
-# Lightweight liveness — full matcher/weights checked on first /api/health after warm or analyze
 @app.get("/api/live")
 def live():
     return {"ok": True}
@@ -56,11 +48,6 @@ def health():
         "brand_model": "google/siglip2-base-patch16-224",
         "catalog_brands": get_matcher().brands,
     }
-
-
-@app.get("/api/planograms")
-def api_list_planograms():
-    return {"planograms": list_planograms()}
 
 
 @app.get("/api/samples")
@@ -86,7 +73,6 @@ def get_sample(name: str):
 async def analyze(
     file: Optional[UploadFile] = File(None),
     sample: Optional[str] = Query(None),
-    use_cache: bool = Query(False),
     planogram: str = Query("auto"),
     expected: Optional[str] = Query(
         None,
@@ -105,22 +91,6 @@ async def analyze(
         if not src.exists():
             raise HTTPException(404, f"Sample not found: {sample}")
         image_path = src
-        # Cache only when planogram mode is default auto and no custom expected
-        if use_cache and planogram == "auto" and not expected_brands:
-            index_path = OUT_DIR / "index.json"
-            if index_path.exists():
-                import json
-
-                index = json.loads(index_path.read_text(encoding="utf-8"))
-                cached_id = (index.get("by_image") or {}).get(sample)
-                cached_report = OUT_DIR / cached_id / "report.json" if cached_id else None
-                if cached_report and cached_report.exists():
-                    payload = json.loads(cached_report.read_text(encoding="utf-8"))
-                    payload["cached"] = True
-                    payload["annotated_url"] = f"/api/results/{cached_id}/annotated.jpg"
-                    payload["json_url"] = f"/api/results/{cached_id}/report.json"
-                    payload["excel_url"] = f"/api/results/{cached_id}/report.xlsx"
-                    return payload
     else:
         suffix = Path(file.filename or "upload.jpg").suffix or ".jpg"
         image_path = UPLOADS_DIR / f"{rid}{suffix}"
@@ -139,19 +109,10 @@ async def analyze(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(500, str(exc)) from exc
 
-    payload["cached"] = False
     payload["annotated_url"] = f"/api/results/{rid}/annotated.jpg"
     payload["json_url"] = f"/api/results/{rid}/report.json"
     payload["excel_url"] = f"/api/results/{rid}/report.xlsx"
     return payload
-
-
-@app.get("/api/results/{result_id}")
-def get_result(result_id: str):
-    path = OUT_DIR / result_id / "report.json"
-    if not path.exists():
-        raise HTTPException(404, "Result not found")
-    return FileResponse(path, media_type="application/json")
 
 
 @app.get("/api/results/{result_id}/annotated.jpg")
@@ -180,36 +141,6 @@ def get_excel(result_id: str):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         filename=path.name,
     )
-
-
-@app.get("/api/export.xlsx")
-def get_batch_excel():
-    path = OUT_DIR / "batch.xlsx"
-    if not path.exists():
-        raise HTTPException(404, "Batch Excel not found — run CLI batch first")
-    return FileResponse(
-        path,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        filename="batch.xlsx",
-    )
-
-
-@app.get("/api/results")
-def list_results():
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    items = []
-    for d in sorted(OUT_DIR.iterdir()):
-        report = d / "report.json"
-        if d.is_dir() and report.exists():
-            items.append(
-                {
-                    "result_id": d.name,
-                    "json_url": f"/api/results/{d.name}/report.json",
-                    "annotated_url": f"/api/results/{d.name}/annotated.jpg",
-                    "excel_url": f"/api/results/{d.name}/report.xlsx",
-                }
-            )
-    return {"results": items}
 
 
 if WEB_DIR.exists():

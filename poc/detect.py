@@ -53,15 +53,6 @@ _model = None
 _model_weights: Optional[str] = None
 
 
-def ensure_sku110k_weights() -> Path:
-    """Return path to base SKU-110K YOLO11s weights (must already be on disk)."""
-    if SKU110K_BASE.exists():
-        return SKU110K_BASE
-    raise FileNotFoundError(
-        f"Missing {SKU110K_BASE}. Place sku110k-yolo11-s640.pt under models/sku110k/"
-    )
-
-
 def default_detector_weights() -> str:
     """Prefer fine-tuned sample weights, else SKU-110K base."""
     if SKU110K_FINETUNED.exists():
@@ -80,12 +71,6 @@ def get_model(weights: Optional[str] = None):
         _model = YOLO(path)
         _model_weights = path
     return _model
-
-
-def reset_model() -> None:
-    global _model, _model_weights
-    _model = None
-    _model_weights = None
 
 
 def crop_fridge_panel(image_bgr: np.ndarray) -> Tuple[np.ndarray, int]:

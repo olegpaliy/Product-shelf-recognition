@@ -2,7 +2,6 @@ const state = {
   file: null,
   sample: null,
   hasResult: false,
-  lastData: null,
 };
 
 const NAV_TITLES = {
@@ -248,7 +247,6 @@ function renderCooler(data) {
 }
 
 function renderResult(data) {
-  state.lastData = data;
   setNavEnabled(true);
   setActiveNav("planogram");
 

@@ -10,36 +10,6 @@ ROOT = Path(__file__).resolve().parents[1]
 PLANOGRAMS_DIR = ROOT / "planograms"
 
 
-def list_planograms() -> List[Dict[str, Any]]:
-    PLANOGRAMS_DIR.mkdir(parents=True, exist_ok=True)
-    items = [
-        {
-            "id": "auto",
-            "name": "Auto (файл схеми з іменем sample, інакше none)",
-            "path": None,
-        },
-        {
-            "id": "custom",
-            "name": "Custom (бренди з поля Expected)",
-            "path": None,
-        },
-    ]
-    for path in sorted(PLANOGRAMS_DIR.glob("*.json")):
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            data = {}
-        items.append(
-            {
-                "id": path.stem,
-                "name": data.get("name") or path.stem,
-                "path": str(path),
-                "notes": data.get("notes"),
-            }
-        )
-    return items
-
-
 def load_planogram_by_id(planogram_id: str) -> Dict[str, Any]:
     path = PLANOGRAMS_DIR / f"{planogram_id}.json"
     if not path.exists():
@@ -66,7 +36,7 @@ def planogram_from_expected_brands(
         "name": "Custom expected brands",
         "own_brands": list(own_brands) if own_brands is not None else cleaned,
         "shelves": {"shelf_1": cleaned} if cleaned else {},
-        "notes": "Built from UI expected brands",
+        "notes": "Built from expected brands query param",
     }
 
 
