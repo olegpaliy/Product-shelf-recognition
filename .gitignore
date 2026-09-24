@@ -2,6 +2,8 @@
 out/
 uploads/
 runs/
+datasets/
+docs/
 __pycache__/
 *.pyc
 .Python

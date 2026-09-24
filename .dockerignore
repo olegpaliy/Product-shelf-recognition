@@ -9,12 +9,10 @@ out
 uploads
 runs
 datasets
+docs
 models
 *.pt
 *.pth
 *.onnx
 .env
-*.md
-!README.md
-agent-transcripts
-.cursor
+*.pptx

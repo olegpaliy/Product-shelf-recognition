@@ -1,5 +1,0 @@
-path: /Users/olehpalii/Documents/Product-shelf-recognition/datasets/detect
-train: images/train
-val: images/val
-names:
-  0: product
