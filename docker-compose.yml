@@ -1,0 +1,27 @@
+services:
+  shelf-api:
+    build: .
+    image: product-shelf-recognition:poc
+    ports:
+      - "8000:8000"
+    volumes:
+      # Required for 1:1 quality — not in git; copy from a machine that already has them
+      - ./models:/app/models:ro
+      - ./out:/app/out
+      # Persist SigLIP2 / HF downloads across restarts
+      - hf_cache:/data/hf
+      - ultralytics_cache:/data/ultralytics
+    environment:
+      - HF_HOME=/data/hf
+      - TRANSFORMERS_CACHE=/data/hf
+      - ULTRALYTICS_HOME=/data/ultralytics
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+volumes:
+  hf_cache:
+  ultralytics_cache:

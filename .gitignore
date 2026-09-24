@@ -9,10 +9,14 @@ __pycache__/
 venv/
 .DS_Store
 
-# model weights (download separately)
+# model weights — only models/sku110k demo weights tracked via Git LFS
 *.pt
 *.pth
 *.onnx
 weights/
-models/
+models/**
+!models/sku110k/
+!models/sku110k/**
+models/sku110k/*bad*
+models/sku110k/*live*
 yolov8*.pt

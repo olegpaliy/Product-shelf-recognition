@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import cv2
 import numpy as np
@@ -50,6 +50,21 @@ TEXT_PROMPTS: Dict[str, List[str]] = {
 DEFAULT_MODEL = "google/siglip2-base-patch16-224"
 
 
+def _as_feature_tensor(feats: Any) -> torch.Tensor:
+    """Normalize get_*_features output across transformers versions."""
+    if torch.is_tensor(feats):
+        return feats
+    for key in ("pooler_output", "image_embeds", "text_embeds", "last_hidden_state"):
+        val = getattr(feats, key, None)
+        if val is None and isinstance(feats, dict):
+            val = feats.get(key)
+        if torch.is_tensor(val):
+            if key == "last_hidden_state":
+                return val[:, 0]
+            return val
+    raise TypeError(f"Unsupported features type: {type(feats)}")
+
+
 class BrandMatcher:
     """Match product crops to brands with SigLIP2 image+text scores."""
 
@@ -84,7 +99,7 @@ class BrandMatcher:
         inputs = self.processor(images=image, return_tensors="pt")
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
         with torch.no_grad():
-            feats = self.model.get_image_features(**inputs)
+            feats = _as_feature_tensor(self.model.get_image_features(**inputs))
             feats = feats / feats.norm(dim=-1, keepdim=True)
         return feats.squeeze(0).float().cpu().numpy().astype(np.float32)
 
@@ -103,7 +118,7 @@ class BrandMatcher:
         )
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
         with torch.no_grad():
-            feats = self.model.get_text_features(**inputs)
+            feats = _as_feature_tensor(self.model.get_text_features(**inputs))
             feats = feats / feats.norm(dim=-1, keepdim=True)
         return feats.float().cpu().numpy().astype(np.float32)
 

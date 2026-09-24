@@ -1,12 +1,14 @@
-fastapi>=0.110.0
-uvicorn[standard]>=0.27.0
-ultralytics>=8.1.0
-opencv-python-headless>=4.8.0
-pillow>=10.0.0
-openpyxl>=3.1.0
-numpy>=1.24.0
-python-multipart>=0.0.9
-torchvision>=0.16.0
-transformers>=4.45.0
-sentencepiece>=0.2.0
-protobuf>=4.25.0
+# Pinned close to the author's local PoC venv for Docker 1:1 behavior.
+fastapi==0.128.8
+uvicorn[standard]==0.39.0
+ultralytics==8.4.153
+opencv-python-headless==4.11.0.86
+pillow==11.3.0
+openpyxl==3.1.5
+numpy==1.26.4
+python-multipart==0.0.20
+# torch/torchvision installed from CPU index in Dockerfile first
+torchvision==0.23.0
+transformers==4.57.6
+sentencepiece==0.2.2
+protobuf==6.33.6

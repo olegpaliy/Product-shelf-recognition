@@ -38,6 +38,12 @@ def reset_matcher() -> None:
     _matcher = None
 
 
+# Lightweight liveness — full matcher/weights checked on first /api/health after warm or analyze
+@app.get("/api/live")
+def live():
+    return {"ok": True}
+
+
 @app.get("/api/health")
 def health():
     weights = default_detector_weights()

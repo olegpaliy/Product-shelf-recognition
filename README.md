@@ -5,7 +5,33 @@ PoC: фото холодильника / полиці → QA → рамки → 
 ## Документи
 - [План PoC](docs/POC-PLAN.md)
 
-## Швидкий старт
+## Docker (1:1 з локальним демо)
+
+Ваги YOLO лежать у репо через **Git LFS** (`models/sku110k/sku110k-finetuned.pt`).
+
+Потрібні: [Docker Desktop](https://www.docker.com/products/docker-desktop/) + `git-lfs`.
+
+```bash
+# один раз на машині
+brew install git-lfs   # або: https://git-lfs.com
+git lfs install
+
+git clone <repo-url>
+cd Product-shelf-recognition
+git lfs pull           # підтянуть .pt якщо clone без LFS-файлів
+
+docker compose up --build
+```
+
+Відкрий [http://127.0.0.1:8000](http://127.0.0.1:8000).
+
+- Без `models/sku110k/*.pt` контейнер **не стартує** (щоб не впасти на `yolov8n`).
+- SigLIP2 тягнеться з Hugging Face при першому аналізі (кеш у Docker volume).
+- UI / `catalog/` / `samples/` / `planograms/` уже в image; ваги монтуються з `./models`.
+
+Зупинити: `docker compose down`.
+
+## Швидкий старт (без Docker)
 
 ```bash
 python3 -m venv .venv
@@ -21,7 +47,7 @@ python -m poc.seed_catalog
 python -m poc.run --input samples/ --output out/
 python -m poc.index_out
 
-# веб-UI
+# веб-UI (потрібні ті самі models/sku110k/*.pt)
 uvicorn poc.api:app --reload --host 127.0.0.1 --port 8000
 ```
 
