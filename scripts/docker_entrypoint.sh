@@ -9,15 +9,11 @@ if [[ ! -f "${WEIGHTS}" && ! -f "${BASE}" ]]; then
   cat <<'EOF' >&2
 ERROR: No YOLO weights mounted.
 
-Place at least one of these on the host, then re-run compose:
+Need at least:
 
-  models/sku110k/sku110k-finetuned.pt   (preferred — same as local demo)
-  models/sku110k/sku110k-yolo11-s640.pt
+  models/sku110k/sku110k-finetuned.pt
 
-Example:
-  mkdir -p models/sku110k
-  # copy .pt files from the machine that already runs the PoC
-  docker compose up --build
+(Git LFS: git lfs pull, then docker compose up --build)
 EOF
   exit 1
 fi

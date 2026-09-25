@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from openpyxl import Workbook
 
@@ -73,36 +73,3 @@ def write_excel(path: Path, payload: Dict[str, Any]) -> None:
 
     path_out = Path(path)
     wb.save(path_out)
-
-
-def write_batch_excel(path: Path, results: List[Dict[str, Any]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "batch"
-    ws.append(
-        [
-            "result_id",
-            "image",
-            "valid",
-            "detections",
-            "compliance_pct",
-            "missing",
-            "competitor",
-        ]
-    )
-    for payload in results:
-        plan = payload.get("planogram", {})
-        qa = payload.get("qa", {})
-        ws.append(
-            [
-                payload.get("result_id"),
-                payload.get("image"),
-                qa.get("valid"),
-                payload.get("detection_count"),
-                plan.get("coarse_compliance_pct"),
-                ", ".join(plan.get("missing") or []),
-                ", ".join(plan.get("competitor") or []),
-            ]
-        )
-    wb.save(path)
