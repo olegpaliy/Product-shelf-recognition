@@ -4,10 +4,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>ХО · Image Recognition</title>
-  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/styles.css?v=samples-lg" />
 </head>
 <body>
-  <div class="app-shell">
+  <div class="app-shell nav-hidden">
     <aside class="side-nav" aria-label="Модулі">
       <button type="button" class="nav-item" data-nav="share" data-target="panel-share" disabled>
         Нумерична дистрибуція
@@ -15,7 +15,7 @@
       <button type="button" class="nav-item" data-nav="details" data-target="panel-shelves" disabled>
         Нумерична дистрибуція (деталі)
       </button>
-      <button type="button" class="nav-item active" data-nav="planogram" data-target="panel-cooler">
+      <button type="button" class="nav-item active" data-nav="planogram" data-target="panel-cooler" disabled>
         Планограма ХО
       </button>
       <button type="button" class="nav-item" data-nav="missing" data-target="panel-missing" disabled>
@@ -24,7 +24,7 @@
       <button type="button" class="nav-item" data-nav="competitor" data-target="panel-competitor" disabled>
         Конкурент в ХО
       </button>
-      <button type="button" class="nav-item" data-nav="visits" data-target="panel-qa">
+      <button type="button" class="nav-item" data-nav="visits" data-target="panel-qa" disabled>
         Розрахунок % візитів з фото і валідних фото
       </button>
     </aside>
@@ -110,6 +110,6 @@
       </section>
     </main>
   </div>
-  <script src="/app.js"></script>
+  <script src="/app.js?v=uncrop-nav"></script>
 </body>
 </html>

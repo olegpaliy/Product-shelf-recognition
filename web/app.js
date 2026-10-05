@@ -20,13 +20,9 @@ const $ = (id) => document.getElementById(id);
 function setNavEnabled(hasResult) {
   state.hasResult = hasResult;
   document.querySelectorAll(".nav-item").forEach((btn) => {
-    const key = btn.dataset.nav;
-    if (RESULT_NAV.has(key)) {
-      btn.disabled = !hasResult;
-    } else {
-      btn.disabled = false;
-    }
+    btn.disabled = !hasResult;
   });
+  document.querySelector(".app-shell")?.classList.toggle("nav-hidden", !hasResult);
 }
 
 function setActiveNav(key) {
@@ -357,6 +353,7 @@ $("btn-back").addEventListener("click", () => {
   $("screen-result").classList.add("hidden");
   $("screen-upload").classList.remove("hidden");
   $("btn-back").classList.add("hidden");
+  setNavEnabled(false);
   setActiveNav("planogram");
   document.querySelectorAll(".metric-panel").forEach((el) => el.classList.remove("flash"));
 });
