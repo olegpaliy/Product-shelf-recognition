@@ -47,7 +47,7 @@ TEXT_PROMPTS: Dict[str, List[str]] = {
     "voda": ["clear water bottle with vertical white VODA text label"],
 }
 
-DEFAULT_MODEL = "google/siglip2-base-patch16-224"
+DEFAULT_MODEL = "google/siglip2-so400m-patch16-256"
 
 
 def _as_feature_tensor(feats: Any) -> torch.Tensor:
@@ -78,36 +78,87 @@ class BrandMatcher:
         model_id: str = DEFAULT_MODEL,
         image_weight: float = 0.75,
         text_weight: float = 0.25,
+        batch_size: int = 16,
     ) -> None:
         self.catalog_dir = Path(catalog_dir)
         self.threshold = threshold
         self.margin = margin
         self.image_weight = image_weight
         self.text_weight = text_weight
+        self.batch_size = max(1, int(batch_size))
         self.model_id = model_id
-        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        if device:
+            self.device = device
+        elif torch.cuda.is_available():
+            self.device = "cuda"
+        elif getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+            self.device = "mps"
+        else:
+            self.device = "cpu"
 
         self.processor = AutoProcessor.from_pretrained(model_id)
-        self.model = AutoModel.from_pretrained(model_id).eval().to(self.device)
+        # Avoid accelerate meta-init (.to(mps) fails with "copy out of meta tensor").
+        self.model = AutoModel.from_pretrained(
+            model_id, low_cpu_mem_usage=False
+        ).eval()
+        self.model.to(self.device)
 
         self.brand_embeddings: Dict[str, np.ndarray] = {}
         self.text_embeddings: Dict[str, np.ndarray] = {}
         self._load_text_prototypes()
         self._load_catalog()
 
-    def _embed_pil(self, image: Image.Image) -> np.ndarray:
-        inputs = self.processor(images=image, return_tensors="pt")
-        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+    @property
+    def embed_dim(self) -> int:
+        cfg = getattr(self.model, "config", None)
+        dim = getattr(cfg, "projection_dim", None) or getattr(cfg, "hidden_size", None)
+        return int(dim or 1152)
+
+    def _embed_pils(self, images: List[Image.Image]) -> np.ndarray:
+        """Embed PIL images in batches; returns (N, D) float32 L2-normalized."""
+        if not images:
+            return np.zeros((0, self.embed_dim), dtype=np.float32)
+        chunks: List[np.ndarray] = []
+        bs = self.batch_size
         with torch.no_grad():
-            feats = _as_feature_tensor(self.model.get_image_features(**inputs))
-            feats = feats / feats.norm(dim=-1, keepdim=True)
-        return feats.squeeze(0).float().cpu().numpy().astype(np.float32)
+            for i in range(0, len(images), bs):
+                batch = images[i : i + bs]
+                inputs = self.processor(images=batch, return_tensors="pt")
+                inputs = {k: v.to(self.device) for k, v in inputs.items()}
+                feats = _as_feature_tensor(self.model.get_image_features(**inputs))
+                feats = feats / feats.norm(dim=-1, keepdim=True)
+                chunks.append(feats.float().cpu().numpy().astype(np.float32))
+        return np.concatenate(chunks, axis=0)
+
+    def _embed_pil(self, image: Image.Image) -> np.ndarray:
+        return self._embed_pils([image])[0]
 
     def _embed_bgr(self, image_bgr: np.ndarray) -> np.ndarray:
         if image_bgr is None or image_bgr.size == 0:
-            return np.zeros(768, dtype=np.float32)
+            return np.zeros(self.embed_dim, dtype=np.float32)
         rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
         return self._embed_pil(Image.fromarray(rgb))
+
+    def _embed_bgrs(self, images_bgr: List[Optional[np.ndarray]]) -> np.ndarray:
+        """Embed BGR crops; empty/tiny slots get zero vectors without a model call."""
+        n = len(images_bgr)
+        out = np.zeros((n, self.embed_dim), dtype=np.float32)
+        pil_batch: List[Image.Image] = []
+        indices: List[int] = []
+        for i, image_bgr in enumerate(images_bgr):
+            if image_bgr is None or image_bgr.size == 0:
+                continue
+            h, w = image_bgr.shape[:2]
+            if h < 12 or w < 8:
+                continue
+            rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+            pil_batch.append(Image.fromarray(rgb))
+            indices.append(i)
+        if pil_batch:
+            embs = self._embed_pils(pil_batch)
+            for row, idx in enumerate(indices):
+                out[idx] = embs[row]
+        return out
 
     def _embed_texts(self, texts: List[str]) -> np.ndarray:
         inputs = self.processor(
@@ -132,19 +183,26 @@ class BrandMatcher:
     def _load_catalog(self) -> None:
         if not self.catalog_dir.exists():
             return
+        # Collect all catalog images, embed in one batched pass, group by brand.
+        brand_indices: Dict[str, List[int]] = {}
+        pils: List[Image.Image] = []
         for brand_dir in sorted(self.catalog_dir.iterdir()):
             if not brand_dir.is_dir() or brand_dir.name.startswith("."):
                 continue
-            embs = []
             for img_path in sorted(brand_dir.glob("*")):
                 if img_path.suffix.lower() not in {".jpg", ".jpeg", ".png", ".webp"}:
                     continue
                 img = cv2.imread(str(img_path))
                 if img is None:
                     continue
-                embs.append(self._embed_bgr(img))
-            if embs:
-                self.brand_embeddings[brand_dir.name] = np.stack(embs, axis=0)
+                rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                brand_indices.setdefault(brand_dir.name, []).append(len(pils))
+                pils.append(Image.fromarray(rgb))
+        if not pils:
+            return
+        embs = self._embed_pils(pils)
+        for brand, idxs in brand_indices.items():
+            self.brand_embeddings[brand] = embs[idxs]
 
     @property
     def brands(self) -> List[str]:
@@ -160,17 +218,18 @@ class BrandMatcher:
         blue = (h >= 95) & (h <= 135) & (s >= 35) & (v <= 200)
         return float(blue.mean()) >= 0.06
 
-    def predict_crop(self, crop_bgr: np.ndarray) -> BrandPrediction:
+    def _score_embedding(
+        self,
+        emb: np.ndarray,
+        *,
+        crop_bgr: Optional[np.ndarray] = None,
+    ) -> BrandPrediction:
         brands = self.brands
         if not brands:
             return BrandPrediction("unknown", 0.0)
-        if crop_bgr is None or crop_bgr.size == 0:
-            return BrandPrediction("unknown", 0.0)
-        h, w = crop_bgr.shape[:2]
-        if h < 12 or w < 8:
+        if emb is None or emb.size == 0 or float(np.linalg.norm(emb)) < 1e-8:
             return BrandPrediction("unknown", 0.0)
 
-        emb = self._embed_bgr(crop_bgr)
         scores: Dict[str, float] = {}
         img_scores: Dict[str, float] = {}
         for brand in brands:
@@ -195,7 +254,11 @@ class BrandMatcher:
             return BrandPrediction("unknown", 0.0)
 
         # Clear water bottles must not become Luzhanska.
-        if "luzhanska" in scores and not self._looks_dark_blue_bottle(crop_bgr):
+        if (
+            "luzhanska" in scores
+            and crop_bgr is not None
+            and not self._looks_dark_blue_bottle(crop_bgr)
+        ):
             scores.pop("luzhanska", None)
             if not scores:
                 return BrandPrediction("unknown", 0.0)
@@ -212,21 +275,35 @@ class BrandMatcher:
             return BrandPrediction("unknown", float(best_score))
         return BrandPrediction(best_brand, float(best_score))
 
+    def predict_crop(self, crop_bgr: np.ndarray) -> BrandPrediction:
+        if crop_bgr is None or crop_bgr.size == 0:
+            return BrandPrediction("unknown", 0.0)
+        h, w = crop_bgr.shape[:2]
+        if h < 12 or w < 8:
+            return BrandPrediction("unknown", 0.0)
+        emb = self._embed_bgr(crop_bgr)
+        return self._score_embedding(emb, crop_bgr=crop_bgr)
+
     def predict_detections(
         self,
         image_bgr: np.ndarray,
         detections: List[Detection],
     ) -> List[BrandPrediction]:
-        preds: List[BrandPrediction] = []
+        if not detections:
+            return []
         h, w = image_bgr.shape[:2]
+        crops: List[Optional[np.ndarray]] = []
         for det in detections:
             x1 = max(0, int(det.x1))
             y1 = max(0, int(det.y1))
             x2 = min(w, int(det.x2))
             y2 = min(h, int(det.y2))
-            crop = image_bgr[y1:y2, x1:x2]
-            preds.append(self.predict_crop(crop))
-        return preds
+            crops.append(image_bgr[y1:y2, x1:x2])
+        embs = self._embed_bgrs(crops)
+        return [
+            self._score_embedding(embs[i], crop_bgr=crops[i])
+            for i in range(len(crops))
+        ]
 
 
 def aggregate_brand_counts(predictions: List[BrandPrediction]) -> Dict[str, int]:

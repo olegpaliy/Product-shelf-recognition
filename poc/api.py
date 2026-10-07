@@ -11,8 +11,8 @@ from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from .brand import BrandMatcher
-from .detect import default_detector_weights
+from .brand import DEFAULT_MODEL as BRAND_MODEL, BrandMatcher
+from .detect import default_detector_weights, detect_device
 from .pipeline import ROOT, analyze_image
 
 SAMPLES_DIR = ROOT / "samples"
@@ -38,31 +38,41 @@ def live():
 
 @app.get("/api/health")
 def health():
+    matcher = get_matcher()
     weights = default_detector_weights()
     return {
         "ok": True,
         "version": "0.6.0",
         "detector": "sku110k",
         "detector_weights": weights,
+        "detector_device": detect_device(),
         "brand_backend": "siglip2",
-        "brand_model": "google/siglip2-base-patch16-224",
-        "catalog_brands": get_matcher().brands,
+        "brand_model": BRAND_MODEL,
+        "brand_device": matcher.device,
+        "catalog_brands": matcher.brands,
     }
+
+
+def _is_sample_image(name: str) -> bool:
+    """Real demo photos only — skip macOS AppleDouble (._*) and hidden files."""
+    if not name or name.startswith("."):
+        return False
+    return Path(name).suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}
 
 
 @app.get("/api/samples")
 def list_samples():
     SAMPLES_DIR.mkdir(parents=True, exist_ok=True)
     files = sorted(
-        p.name
-        for p in SAMPLES_DIR.iterdir()
-        if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}
+        p.name for p in SAMPLES_DIR.iterdir() if p.is_file() and _is_sample_image(p.name)
     )
     return {"samples": files}
 
 
 @app.get("/api/samples/{name}")
 def get_sample(name: str):
+    if not _is_sample_image(name) or "/" in name or "\\" in name:
+        raise HTTPException(404, "Sample not found")
     path = SAMPLES_DIR / name
     if not path.exists() or not path.is_file():
         raise HTTPException(404, "Sample not found")

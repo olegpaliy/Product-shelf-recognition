@@ -16,18 +16,9 @@ docker compose up --build
 
 Open http://127.0.0.1:8000
 
-YOLO weights ship via Git LFS (`models/sku110k/`). SigLIP2 downloads from Hugging Face on first analyze.
+YOLO weights ship via Git LFS (`models/sku110k/`). Brand match uses SigLIP2 `google/siglip2-so400m-patch16-256` from Hugging Face on first analyze.
 
 Stop: `docker compose down`
-
-## Run locally (optional)
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn poc.api:app --host 127.0.0.1 --port 8000
-```
 
 ## Layout
 

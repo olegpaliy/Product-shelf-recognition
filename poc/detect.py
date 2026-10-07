@@ -53,6 +53,20 @@ _model = None
 _model_weights: Optional[str] = None
 
 
+def detect_device() -> str:
+    """Prefer CUDA, then Apple MPS, else CPU."""
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            return "0"
+        if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+            return "mps"
+    except Exception:  # noqa: BLE001
+        pass
+    return "cpu"
+
+
 def default_detector_weights() -> str:
     """Prefer fine-tuned sample weights, else SKU-110K base."""
     if SKU110K_FINETUNED.exists():
@@ -191,6 +205,7 @@ def detect_products(
         source=image_bgr,
         conf=conf,
         imgsz=imgsz,
+        device=detect_device(),
         verbose=False,
     )
     detections: List[Detection] = []
