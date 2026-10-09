@@ -130,15 +130,6 @@ class BrandMatcher:
                 chunks.append(feats.float().cpu().numpy().astype(np.float32))
         return np.concatenate(chunks, axis=0)
 
-    def _embed_pil(self, image: Image.Image) -> np.ndarray:
-        return self._embed_pils([image])[0]
-
-    def _embed_bgr(self, image_bgr: np.ndarray) -> np.ndarray:
-        if image_bgr is None or image_bgr.size == 0:
-            return np.zeros(self.embed_dim, dtype=np.float32)
-        rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
-        return self._embed_pil(Image.fromarray(rgb))
-
     def _embed_bgrs(self, images_bgr: List[Optional[np.ndarray]]) -> np.ndarray:
         """Embed BGR crops; empty/tiny slots get zero vectors without a model call."""
         n = len(images_bgr)
@@ -274,15 +265,6 @@ class BrandMatcher:
         if best_score < self.threshold or (best_score - second) < self.margin:
             return BrandPrediction("unknown", float(best_score))
         return BrandPrediction(best_brand, float(best_score))
-
-    def predict_crop(self, crop_bgr: np.ndarray) -> BrandPrediction:
-        if crop_bgr is None or crop_bgr.size == 0:
-            return BrandPrediction("unknown", 0.0)
-        h, w = crop_bgr.shape[:2]
-        if h < 12 or w < 8:
-            return BrandPrediction("unknown", 0.0)
-        emb = self._embed_bgr(crop_bgr)
-        return self._score_embedding(emb, crop_bgr=crop_bgr)
 
     def predict_detections(
         self,
