@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>ХО · Image Recognition</title>
-  <link rel="stylesheet" href="/styles.css?v=nav-order" />
+  <link rel="stylesheet" href="/styles.css?v=brand-correct" />
 </head>
 <body>
   <div class="app-shell nav-hidden">
@@ -60,7 +60,45 @@
       <section id="screen-result" class="screen hidden">
         <div class="result-layout">
           <div class="photo-col">
-            <img id="annotated" alt="Annotated result" class="annotated" />
+            <div class="photo-frame" id="photo-frame">
+              <img id="annotated" alt="Annotated result" class="annotated" />
+              <div id="bbox-layer" class="bbox-layer" aria-hidden="true"></div>
+            </div>
+            <div id="panel-correct" class="card correct-panel">
+              <div class="panel-head">
+                <h2>Виправлення бренду</h2>
+                <button id="btn-reload-catalog" class="btn outline small" type="button">
+                  Оновити бренд-модель
+                </button>
+              </div>
+              <p id="correct-hint" class="muted small">Клікніть бокс на фото</p>
+              <div id="correct-body" class="correct-body hidden">
+                <p>
+                  <strong>Поточний:</strong>
+                  <span id="correct-current">—</span>
+                </p>
+                <div class="correct-alts" id="correct-alts"></div>
+                <label class="correct-label">
+                  Існуючий бренд
+                  <select id="correct-brand-select"></select>
+                </label>
+                <label class="correct-label">
+                  Новий бренд
+                  <input id="correct-brand-new" type="text" placeholder="напр. aqualife" autocomplete="off" />
+                </label>
+                <div class="row correct-actions">
+                  <button id="btn-correct-ok" class="btn outline small" type="button">Вірно</button>
+                  <button id="btn-correct-change" class="btn outline small" type="button">Змінити</button>
+                  <button id="btn-correct-new" class="btn outline small" type="button">Новий</button>
+                  <button id="btn-correct-unknown" class="btn outline small" type="button">Unknown</button>
+                  <button id="btn-correct-notproduct" class="btn outline small" type="button">Не товар</button>
+                </div>
+                <button id="btn-correct-save" class="btn primary" type="button" disabled>
+                  Зберегти в каталог
+                </button>
+                <p id="correct-status" class="muted small"></p>
+              </div>
+            </div>
           </div>
 
           <aside class="side-panels">
@@ -110,6 +148,6 @@
       </section>
     </main>
   </div>
-  <script src="/app.js?v=nav-order"></script>
+  <script src="/app.js?v=brand-correct"></script>
 </body>
 </html>

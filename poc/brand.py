@@ -19,6 +19,7 @@ from .detect import Detection
 class BrandPrediction:
     brand: str
     confidence: float
+    alternatives: Optional[List[Dict[str, Any]]] = None
 
 
 TEXT_PROMPTS: Dict[str, List[str]] = {
@@ -96,12 +97,15 @@ class BrandMatcher:
         else:
             self.device = "cpu"
 
-        self.processor = AutoProcessor.from_pretrained(model_id)
-        # Avoid accelerate meta-init (.to(mps) fails with "copy out of meta tensor").
+        self.processor = AutoProcessor.from_pretrained(model_id, use_fast=True)
+        # Avoid accelerate meta-init (.to() fails with "copy out of meta tensor").
         self.model = AutoModel.from_pretrained(
-            model_id, low_cpu_mem_usage=False
-        ).eval()
-        self.model.to(self.device)
+            model_id,
+            low_cpu_mem_usage=False,
+            dtype=torch.float32,
+        )
+        self.model = self.model.to(self.device)
+        self.model.eval()
 
         self.brand_embeddings: Dict[str, np.ndarray] = {}
         self.text_embeddings: Dict[str, np.ndarray] = {}
@@ -195,6 +199,23 @@ class BrandMatcher:
         for brand, idxs in brand_indices.items():
             self.brand_embeddings[brand] = embs[idxs]
 
+    def reload_catalog(self) -> None:
+        """Re-embed catalog images; keep loaded SigLIP + text prototypes."""
+        self.brand_embeddings = {}
+        self._load_catalog()
+
+    def add_reference(self, brand: str, image_bgr: np.ndarray) -> None:
+        """Embed one crop and append to the brand's reference matrix."""
+        emb = self._embed_bgrs([image_bgr])[0]
+        if float(np.linalg.norm(emb)) < 1e-8:
+            raise ValueError("Could not embed reference crop")
+        emb = emb.astype(np.float32)
+        existing = self.brand_embeddings.get(brand)
+        if existing is None:
+            self.brand_embeddings[brand] = emb[None, :]
+        else:
+            self.brand_embeddings[brand] = np.vstack([existing, emb[None, :]])
+
     @property
     def brands(self) -> List[str]:
         return sorted(set(self.brand_embeddings) | set(self.text_embeddings))
@@ -217,9 +238,9 @@ class BrandMatcher:
     ) -> BrandPrediction:
         brands = self.brands
         if not brands:
-            return BrandPrediction("unknown", 0.0)
+            return BrandPrediction("unknown", 0.0, alternatives=[])
         if emb is None or emb.size == 0 or float(np.linalg.norm(emb)) < 1e-8:
-            return BrandPrediction("unknown", 0.0)
+            return BrandPrediction("unknown", 0.0, alternatives=[])
 
         scores: Dict[str, float] = {}
         img_scores: Dict[str, float] = {}
@@ -242,7 +263,7 @@ class BrandMatcher:
             scores[brand] = sum(p * wt for p, wt in zip(parts, weights)) / wsum
 
         if not scores:
-            return BrandPrediction("unknown", 0.0)
+            return BrandPrediction("unknown", 0.0, alternatives=[])
 
         # Clear water bottles must not become Luzhanska.
         if (
@@ -252,19 +273,28 @@ class BrandMatcher:
         ):
             scores.pop("luzhanska", None)
             if not scores:
-                return BrandPrediction("unknown", 0.0)
+                return BrandPrediction("unknown", 0.0, alternatives=[])
 
         ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+        alternatives = [
+            {"brand": b, "score": round(float(s), 4)} for b, s in ranked[:3]
+        ]
         best_brand, best_score = ranked[0]
         second = ranked[1][1] if len(ranked) > 1 else -1.0
         # Extra bar for luzhanska: need a strong visual match to catalog blues.
         if best_brand == "luzhanska":
             img_s = img_scores.get("luzhanska", 0.0)
             if img_s < 0.45 or (best_score - second) < max(self.margin, 0.03):
-                return BrandPrediction("unknown", float(best_score))
+                return BrandPrediction(
+                    "unknown", float(best_score), alternatives=alternatives
+                )
         if best_score < self.threshold or (best_score - second) < self.margin:
-            return BrandPrediction("unknown", float(best_score))
-        return BrandPrediction(best_brand, float(best_score))
+            return BrandPrediction(
+                "unknown", float(best_score), alternatives=alternatives
+            )
+        return BrandPrediction(
+            best_brand, float(best_score), alternatives=alternatives
+        )
 
     def predict_detections(
         self,

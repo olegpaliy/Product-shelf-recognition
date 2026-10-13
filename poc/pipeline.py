@@ -102,6 +102,9 @@ def analyze_image(
         plan_cmp = empty_planogram_result(reason=str(resolved.get("source") or "disabled"))
         plan_cmp["source"] = resolved.get("source")
 
+    source_path = result_dir / "source.jpg"
+    save_annotated(source_path, image)
+
     annotated = draw_detections(image, detections, labels=labels)
     annotated_path = result_dir / "annotated.jpg"
     save_annotated(annotated_path, annotated)
@@ -111,6 +114,7 @@ def analyze_image(
         item = det.to_dict()
         item["brand"] = pred.brand
         item["brand_confidence"] = round(pred.confidence, 4)
+        item["brand_alternatives"] = pred.alternatives or []
         item["shelf_row"] = row
         det_payload.append(item)
 
@@ -136,6 +140,7 @@ def analyze_image(
         "planogram_mode": planogram_mode,
         "detections": det_payload,
         "annotated_path": str(annotated_path),
+        "source_path": str(source_path),
         "catalog_brands": matcher.brands,
     }
 

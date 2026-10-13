@@ -2,6 +2,11 @@ const state = {
   file: null,
   sample: null,
   hasResult: false,
+  result: null,
+  selectedIndex: null,
+  mode: "ok", // ok | change | new | unknown | not_product
+  naturalW: 0,
+  naturalH: 0,
 };
 
 const NAV_TITLES = {
@@ -242,7 +247,162 @@ function renderCooler(data) {
   }
 }
 
+function setCorrectStatus(msg) {
+  $("correct-status").textContent = msg || "";
+}
+
+function clearSelection() {
+  state.selectedIndex = null;
+  state.mode = "ok";
+  $("correct-body").classList.add("hidden");
+  $("correct-hint").classList.remove("hidden");
+  $("btn-correct-save").disabled = true;
+  setCorrectStatus("");
+  document.querySelectorAll(".bbox-hit").forEach((el) => el.classList.remove("selected"));
+}
+
+async function fillBrandSelect(brands) {
+  const select = $("correct-brand-select");
+  const current = select.value;
+  select.innerHTML = "";
+  const list = [...new Set(brands || [])].sort();
+  if (!list.length) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "— немає брендів —";
+    select.appendChild(opt);
+    return;
+  }
+  list.forEach((brand) => {
+    const opt = document.createElement("option");
+    opt.value = brand;
+    opt.textContent = brand;
+    select.appendChild(opt);
+  });
+  if (current && list.includes(current)) select.value = current;
+}
+
+async function refreshCatalogSelect() {
+  try {
+    const res = await fetch("/api/catalog");
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    const brands = (data.brands || []).map((b) => b.brand);
+    const fromResult = state.result?.catalog_brands || [];
+    await fillBrandSelect([...brands, ...fromResult]);
+  } catch (err) {
+    await fillBrandSelect(state.result?.catalog_brands || []);
+    setCorrectStatus(err.message || String(err));
+  }
+}
+
+function selectedDetection() {
+  if (!state.result || state.selectedIndex == null) return null;
+  return state.result.detections?.[state.selectedIndex] || null;
+}
+
+function updateCorrectPanel() {
+  const det = selectedDetection();
+  if (!det) {
+    clearSelection();
+    return;
+  }
+  $("correct-hint").classList.add("hidden");
+  $("correct-body").classList.remove("hidden");
+  const brand = det.brand || "unknown";
+  const conf = det.brand_confidence != null ? Number(det.brand_confidence).toFixed(3) : "—";
+  $("correct-current").textContent = `${brand} (${conf})`;
+
+  const alts = $("correct-alts");
+  alts.innerHTML = "";
+  (det.brand_alternatives || []).forEach((alt) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "correct-alt";
+    btn.textContent = `${alt.brand} ${Number(alt.score).toFixed(3)}`;
+    btn.addEventListener("click", () => {
+      state.mode = "change";
+      $("correct-brand-select").value = alt.brand;
+      $("correct-brand-new").value = "";
+      document.querySelectorAll(".correct-alt").forEach((el) => el.classList.remove("active"));
+      btn.classList.add("active");
+      syncSaveEnabled();
+    });
+    alts.appendChild(btn);
+  });
+
+  if (brand && brand !== "unknown" && brand !== "not_product") {
+    const select = $("correct-brand-select");
+    if ([...select.options].some((o) => o.value === brand)) select.value = brand;
+  }
+  syncSaveEnabled();
+}
+
+function syncSaveEnabled() {
+  const det = selectedDetection();
+  if (!det) {
+    $("btn-correct-save").disabled = true;
+    return;
+  }
+  if (state.mode === "unknown" || state.mode === "not_product") {
+    $("btn-correct-save").disabled = false;
+    $("btn-correct-save").textContent = "Застосувати";
+    return;
+  }
+  $("btn-correct-save").textContent = "Зберегти в каталог";
+  if (state.mode === "new") {
+    $("btn-correct-save").disabled = !$("correct-brand-new").value.trim();
+    return;
+  }
+  // ok / change
+  const brand =
+    state.mode === "change"
+      ? $("correct-brand-select").value
+      : det.brand && det.brand !== "unknown"
+        ? det.brand
+        : $("correct-brand-select").value;
+  $("btn-correct-save").disabled = !brand;
+}
+
+function layoutBBoxes() {
+  const img = $("annotated");
+  const layer = $("bbox-layer");
+  if (!img || !layer || !state.result) return;
+  const dets = state.result.detections || [];
+  const nw = state.naturalW || img.naturalWidth;
+  const nh = state.naturalH || img.naturalHeight;
+  if (!nw || !nh) return;
+
+  if (!img.clientWidth || !img.clientHeight) return;
+
+  layer.innerHTML = "";
+  dets.forEach((det, index) => {
+    const hit = document.createElement("button");
+    hit.type = "button";
+    hit.className = "bbox-hit" + (state.selectedIndex === index ? " selected" : "");
+    hit.style.left = `${(det.x1 / nw) * 100}%`;
+    hit.style.top = `${(det.y1 / nh) * 100}%`;
+    hit.style.width = `${((det.x2 - det.x1) / nw) * 100}%`;
+    hit.style.height = `${((det.y2 - det.y1) / nh) * 100}%`;
+    hit.title = `${det.brand || "?"} ${det.brand_confidence ?? ""}`;
+    hit.addEventListener("click", (e) => {
+      e.preventDefault();
+      state.selectedIndex = index;
+      state.mode = "ok";
+      $("correct-brand-new").value = "";
+      document.querySelectorAll(".bbox-hit").forEach((el) => el.classList.remove("selected"));
+      hit.classList.add("selected");
+      updateCorrectPanel();
+    });
+    layer.appendChild(hit);
+  });
+}
+
 function renderResult(data) {
+  state.result = data;
+  state.selectedIndex = null;
+  state.mode = "ok";
+
   setNavEnabled(true);
   setActiveNav("planogram");
 
@@ -250,7 +410,14 @@ function renderResult(data) {
   $("screen-result").classList.remove("hidden");
   $("btn-back").classList.remove("hidden");
 
-  $("annotated").src = data.annotated_url + "?t=" + Date.now();
+  const img = $("annotated");
+  img.onload = () => {
+    state.naturalW = img.naturalWidth;
+    state.naturalH = img.naturalHeight;
+    layoutBBoxes();
+  };
+  img.src = data.annotated_url + "?t=" + Date.now();
+
   $("det-count").textContent = data.detection_count;
   const plan = data.planogram || {};
   const enabled = plan.enabled !== false && plan.coarse_compliance_pct != null;
@@ -307,7 +474,86 @@ function renderResult(data) {
   $("dl-excel").href = data.excel_url;
   $("dl-json").href = data.json_url;
 
+  clearSelection();
+  refreshCatalogSelect();
   highlightPanel("panel-cooler");
+}
+
+async function saveCorrection() {
+  const det = selectedDetection();
+  if (!det || !state.result) return;
+  setCorrectStatus("Збереження…");
+
+  let action = "save";
+  let brand = det.brand;
+
+  if (state.mode === "unknown") {
+    action = "unknown";
+    brand = "unknown";
+  } else if (state.mode === "not_product") {
+    action = "not_product";
+    brand = "not_product";
+  } else if (state.mode === "new") {
+    brand = $("correct-brand-new").value.trim();
+    if (!brand) {
+      setCorrectStatus("Вкажіть назву нового бренду");
+      return;
+    }
+    const created = await fetch("/api/catalog/brands", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: brand }),
+    });
+    if (!created.ok) throw new Error(await created.text());
+    const createdData = await created.json();
+    brand = createdData.brand;
+    action = "save";
+  } else if (state.mode === "change") {
+    brand = $("correct-brand-select").value;
+    action = "save";
+  } else {
+    // ok — save current brand into catalog
+    brand =
+      det.brand && det.brand !== "unknown" && det.brand !== "not_product"
+        ? det.brand
+        : $("correct-brand-select").value;
+    action = "save";
+  }
+
+  const res = await fetch("/api/catalog/references", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      result_id: state.result.result_id,
+      detection_index: state.selectedIndex,
+      brand,
+      action,
+    }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const data = await res.json();
+
+  const idx = state.selectedIndex;
+  state.result.detections[idx].brand = data.brand;
+  if (data.saved) {
+    state.result.detections[idx].brand_confidence = 1;
+    setCorrectStatus(`Збережено в catalog/${data.brand}/`);
+  } else {
+    state.result.detections[idx].brand_confidence = 0;
+    setCorrectStatus(`Позначено як ${data.brand}`);
+  }
+  $("correct-current").textContent = `${data.brand}`;
+  await refreshCatalogSelect();
+  layoutBBoxes();
+}
+
+async function reloadCatalogModel() {
+  setCorrectStatus("Оновлення embeddings…");
+  const res = await fetch("/api/catalog/reload", { method: "POST" });
+  if (!res.ok) throw new Error(await res.text());
+  const data = await res.json();
+  await fillBrandSelect((data.brands || []).map((b) => b.brand));
+  setCorrectStatus("Бренд-модель оновлено (перезапустіть analyze для повного перерахунку полиці)");
 }
 
 async function analyze() {
@@ -355,8 +601,55 @@ $("btn-back").addEventListener("click", () => {
   $("btn-back").classList.add("hidden");
   setNavEnabled(false);
   setActiveNav("planogram");
+  state.result = null;
+  clearSelection();
+  $("bbox-layer").innerHTML = "";
   document.querySelectorAll(".metric-panel").forEach((el) => el.classList.remove("flash"));
 });
+
+$("btn-correct-ok").addEventListener("click", () => {
+  state.mode = "ok";
+  $("correct-brand-new").value = "";
+  syncSaveEnabled();
+  setCorrectStatus("Підтвердження поточного бренду — збережіть у каталог");
+});
+$("btn-correct-change").addEventListener("click", () => {
+  state.mode = "change";
+  $("correct-brand-new").value = "";
+  syncSaveEnabled();
+  setCorrectStatus("Оберіть бренд зі списку або top-3");
+});
+$("btn-correct-new").addEventListener("click", () => {
+  state.mode = "new";
+  syncSaveEnabled();
+  $("correct-brand-new").focus();
+  setCorrectStatus("Вкажіть slug нового бренду");
+});
+$("btn-correct-unknown").addEventListener("click", () => {
+  state.mode = "unknown";
+  syncSaveEnabled();
+  setCorrectStatus("Позначити як unknown (без каталогу)");
+});
+$("btn-correct-notproduct").addEventListener("click", () => {
+  state.mode = "not_product";
+  syncSaveEnabled();
+  setCorrectStatus("Позначити як не товар (без каталогу)");
+});
+$("correct-brand-select").addEventListener("change", () => {
+  state.mode = "change";
+  syncSaveEnabled();
+});
+$("correct-brand-new").addEventListener("input", () => {
+  state.mode = "new";
+  syncSaveEnabled();
+});
+$("btn-correct-save").addEventListener("click", () => {
+  saveCorrection().catch((err) => setCorrectStatus(err.message || String(err)));
+});
+$("btn-reload-catalog").addEventListener("click", () => {
+  reloadCatalogModel().catch((err) => setCorrectStatus(err.message || String(err)));
+});
+window.addEventListener("resize", () => layoutBBoxes());
 
 bindNav();
 setNavEnabled(false);

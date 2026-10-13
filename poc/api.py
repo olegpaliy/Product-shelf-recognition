@@ -2,33 +2,90 @@
 
 from __future__ import annotations
 
+import json
+import re
 import shutil
+import threading
 import uuid
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
+import cv2
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 
 from .brand import DEFAULT_MODEL as BRAND_MODEL, BrandMatcher
 from .detect import default_detector_weights, detect_device
 from .pipeline import ROOT, analyze_image
+from .report import write_json
 
 SAMPLES_DIR = ROOT / "samples"
 OUT_DIR = ROOT / "out"
 WEB_DIR = ROOT / "web"
 UPLOADS_DIR = OUT_DIR / "uploads"
+CATALOG_DIR = ROOT / "catalog"
 
-app = FastAPI(title="Shelf XO Recognition PoC", version="0.6.0")
+app = FastAPI(title="Shelf XO Recognition PoC", version="0.7.0")
 _matcher: Optional[BrandMatcher] = None
+_matcher_lock = threading.Lock()
+
+_BRAND_SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
 def get_matcher() -> BrandMatcher:
     global _matcher
-    if _matcher is None:
-        _matcher = BrandMatcher(ROOT / "catalog")
-    return _matcher
+    if _matcher is not None:
+        return _matcher
+    with _matcher_lock:
+        if _matcher is None:
+            _matcher = BrandMatcher(CATALOG_DIR)
+        return _matcher
+
+
+def slugify_brand(name: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", (name or "").strip().lower()).strip("-")
+    slug = re.sub(r"-{2,}", "-", slug)
+    return slug
+
+
+def _catalog_image_count(brand: str) -> int:
+    brand_dir = CATALOG_DIR / brand
+    if not brand_dir.is_dir():
+        return 0
+    return sum(
+        1
+        for p in brand_dir.iterdir()
+        if p.is_file() and p.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}
+        and not p.name.startswith(".")
+    )
+
+
+def _list_catalog_brands() -> List[Dict[str, Any]]:
+    CATALOG_DIR.mkdir(parents=True, exist_ok=True)
+    disk = {
+        p.name
+        for p in CATALOG_DIR.iterdir()
+        if p.is_dir() and not p.name.startswith(".")
+    }
+    matcher_brands = set(get_matcher().brands)
+    names = sorted(disk | matcher_brands)
+    return [{"brand": b, "image_count": _catalog_image_count(b)} for b in names]
+
+
+class CreateBrandBody(BaseModel):
+    name: str = Field(..., min_length=1, max_length=64)
+
+
+class CatalogReferenceBody(BaseModel):
+    result_id: str
+    detection_index: int = Field(..., ge=0)
+    brand: str = Field(..., min_length=1, max_length=64)
+    action: str = Field(
+        default="save",
+        description="save | confirm | unknown | not_product",
+    )
 
 
 @app.get("/api/live")
@@ -42,7 +99,7 @@ def health():
     weights = default_detector_weights()
     return {
         "ok": True,
-        "version": "0.6.0",
+        "version": "0.7.0",
         "detector": "sku110k",
         "detector_weights": weights,
         "detector_device": detect_device(),
@@ -77,6 +134,116 @@ def get_sample(name: str):
     if not path.exists() or not path.is_file():
         raise HTTPException(404, "Sample not found")
     return FileResponse(path)
+
+
+@app.get("/api/catalog")
+def list_catalog():
+    return {"brands": _list_catalog_brands()}
+
+
+@app.post("/api/catalog/brands")
+def create_brand(body: CreateBrandBody):
+    slug = slugify_brand(body.name)
+    if not slug or not _BRAND_SLUG_RE.match(slug):
+        raise HTTPException(400, "Invalid brand name (use letters, numbers, hyphens)")
+    brand_dir = CATALOG_DIR / slug
+    brand_dir.mkdir(parents=True, exist_ok=True)
+    return {"brand": slug, "image_count": _catalog_image_count(slug)}
+
+
+@app.post("/api/catalog/reload")
+def reload_catalog():
+    matcher = get_matcher()
+    matcher.reload_catalog()
+    return {"ok": True, "brands": _list_catalog_brands()}
+
+
+@app.post("/api/catalog/references")
+def add_catalog_reference(body: CatalogReferenceBody):
+    rid = body.result_id.strip()
+    if not rid or "/" in rid or "\\" in rid or ".." in rid:
+        raise HTTPException(400, "Invalid result_id")
+
+    report_path = OUT_DIR / rid / "report.json"
+    source_path = OUT_DIR / rid / "source.jpg"
+    if not report_path.exists() or not source_path.exists():
+        raise HTTPException(404, "Result not found (missing report or source)")
+
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    detections = report.get("detections") or []
+    idx = body.detection_index
+    if idx >= len(detections):
+        raise HTTPException(400, "detection_index out of range")
+
+    action = (body.action or "save").strip().lower()
+    det = detections[idx]
+
+    if action in {"unknown", "not_product"}:
+        label = "unknown" if action == "unknown" else "not_product"
+        det["brand"] = label
+        det["brand_confidence"] = 0.0
+        det["feedback"] = action
+        detections[idx] = det
+        report["detections"] = detections
+        write_json(report_path, report)
+        return {
+            "ok": True,
+            "saved": False,
+            "brand": label,
+            "detection_index": idx,
+        }
+
+    slug = slugify_brand(body.brand)
+    if not slug or not _BRAND_SLUG_RE.match(slug):
+        raise HTTPException(400, "Invalid brand name")
+    if slug in {"unknown", "not-product", "not_product"}:
+        raise HTTPException(400, "Use action=unknown/not_product instead")
+
+    image = cv2.imread(str(source_path))
+    if image is None:
+        raise HTTPException(500, "Cannot read source image")
+    h, w = image.shape[:2]
+    x1 = max(0, int(det["x1"]))
+    y1 = max(0, int(det["y1"]))
+    x2 = min(w, int(det["x2"]))
+    y2 = min(h, int(det["y2"]))
+    if x2 - x1 < 8 or y2 - y1 < 12:
+        raise HTTPException(400, "Crop too small")
+    crop = image[y1:y2, x1:x2]
+
+    brand_dir = CATALOG_DIR / slug
+    brand_dir.mkdir(parents=True, exist_ok=True)
+    out_name = f"ref_{rid}_{idx}.jpg"
+    out_path = brand_dir / out_name
+    if not cv2.imwrite(str(out_path), crop):
+        raise HTTPException(500, "Failed to write catalog crop")
+
+    matcher = get_matcher()
+    was_new = slug not in matcher.brand_embeddings
+    try:
+        matcher.add_reference(slug, crop)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if was_new:
+        # Ensure disk + matrix stay aligned for brands that only had text before.
+        matcher.reload_catalog()
+
+    det["brand"] = slug
+    det["brand_confidence"] = float(det.get("brand_confidence") or 1.0)
+    det["feedback"] = "save" if action == "save" else action
+    detections[idx] = det
+    report["detections"] = detections
+    report["catalog_brands"] = matcher.brands
+    write_json(report_path, report)
+
+    return {
+        "ok": True,
+        "saved": True,
+        "brand": slug,
+        "path": str(out_path.relative_to(ROOT)),
+        "detection_index": idx,
+        "image_count": _catalog_image_count(slug),
+    }
 
 
 @app.post("/api/analyze")
@@ -120,6 +287,7 @@ async def analyze(
         raise HTTPException(500, str(exc)) from exc
 
     payload["annotated_url"] = f"/api/results/{rid}/annotated.jpg"
+    payload["source_url"] = f"/api/results/{rid}/source.jpg"
     payload["json_url"] = f"/api/results/{rid}/report.json"
     payload["excel_url"] = f"/api/results/{rid}/report.xlsx"
     return payload
@@ -130,6 +298,16 @@ def get_annotated(result_id: str):
     path = OUT_DIR / result_id / "annotated.jpg"
     if not path.exists():
         raise HTTPException(404, "Annotated image not found")
+    return FileResponse(path, media_type="image/jpeg")
+
+
+@app.get("/api/results/{result_id}/source.jpg")
+def get_source(result_id: str):
+    if "/" in result_id or "\\" in result_id or ".." in result_id:
+        raise HTTPException(404, "Source image not found")
+    path = OUT_DIR / result_id / "source.jpg"
+    if not path.exists():
+        raise HTTPException(404, "Source image not found")
     return FileResponse(path, media_type="image/jpeg")
 
 
