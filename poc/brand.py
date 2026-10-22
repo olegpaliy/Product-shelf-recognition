@@ -73,8 +73,14 @@ class BrandMatcher:
         self,
         catalog_dir: Path,
         *,
-        threshold: float = 0.16,
-        margin: float = 0.025,
+        # Stricter accept: prefer unknown over weak nearest-neighbor matches.
+        threshold: float = 0.28,
+        margin: float = 0.07,
+        sparse_ref_limit: int = 3,
+        sparse_image_floor: float = 0.60,
+        sparse_margin: float = 0.09,
+        single_ref_image_floor: float = 0.72,
+        min_image_floor: float = 0.52,
         device: Optional[str] = None,
         model_id: str = DEFAULT_MODEL,
         image_weight: float = 0.75,
@@ -84,6 +90,11 @@ class BrandMatcher:
         self.catalog_dir = Path(catalog_dir)
         self.threshold = threshold
         self.margin = margin
+        self.sparse_ref_limit = max(1, int(sparse_ref_limit))
+        self.sparse_image_floor = sparse_image_floor
+        self.sparse_margin = sparse_margin
+        self.single_ref_image_floor = single_ref_image_floor
+        self.min_image_floor = min_image_floor
         self.image_weight = image_weight
         self.text_weight = text_weight
         self.batch_size = max(1, int(batch_size))
@@ -168,9 +179,32 @@ class BrandMatcher:
             feats = feats / feats.norm(dim=-1, keepdim=True)
         return feats.float().cpu().numpy().astype(np.float32)
 
+    def _catalog_brand_names(self) -> List[str]:
+        if not self.catalog_dir.exists():
+            return []
+        return sorted(
+            p.name
+            for p in self.catalog_dir.iterdir()
+            if p.is_dir() and not p.name.startswith(".")
+        )
+
+    def _prompts_for_brand(self, brand: str) -> List[str]:
+        if brand in TEXT_PROMPTS:
+            return TEXT_PROMPTS[brand]
+        label = brand.replace("-", " ")
+        return [
+            f"a photo of {label} product packaging",
+            f"{label} brand shelf product",
+            label,
+        ]
+
     def _load_text_prototypes(self) -> None:
-        for brand, prompts in TEXT_PROMPTS.items():
-            embs = self._embed_texts(prompts)
+        # Only brands present in this catalog dir (keeps drinks vs Eva separate).
+        brands = self._catalog_brand_names()
+        if not brands:
+            brands = sorted(TEXT_PROMPTS.keys())
+        for brand in brands:
+            embs = self._embed_texts(self._prompts_for_brand(brand))
             mean = embs.mean(axis=0)
             mean = mean / (np.linalg.norm(mean) + 1e-8)
             self.text_embeddings[brand] = mean.astype(np.float32)
@@ -185,6 +219,8 @@ class BrandMatcher:
             if not brand_dir.is_dir() or brand_dir.name.startswith("."):
                 continue
             for img_path in sorted(brand_dir.glob("*")):
+                if img_path.name.startswith("."):
+                    continue
                 if img_path.suffix.lower() not in {".jpg", ".jpeg", ".png", ".webp"}:
                     continue
                 img = cv2.imread(str(img_path))
@@ -200,8 +236,10 @@ class BrandMatcher:
             self.brand_embeddings[brand] = embs[idxs]
 
     def reload_catalog(self) -> None:
-        """Re-embed catalog images; keep loaded SigLIP + text prototypes."""
+        """Re-embed catalog images + text prototypes for brands on disk."""
         self.brand_embeddings = {}
+        self.text_embeddings = {}
+        self._load_text_prototypes()
         self._load_catalog()
 
     def add_reference(self, brand: str, image_bgr: np.ndarray) -> None:
@@ -275,20 +313,59 @@ class BrandMatcher:
             if not scores:
                 return BrandPrediction("unknown", 0.0, alternatives=[])
 
-        ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+        ranked_all = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
         alternatives = [
-            {"brand": b, "score": round(float(s), 4)} for b, s in ranked[:3]
+            {"brand": b, "score": round(float(s), 4)} for b, s in ranked_all[:3]
         ]
+
+        # Image floor before win/margin: weak few-shot brands must not spoil
+        # near-seconds; multi-ref still needs a real visual hit.
+        eligible = dict(scores)
+        for brand in list(eligible):
+            refs = self.brand_embeddings.get(brand)
+            n_refs = 0 if refs is None else int(refs.shape[0])
+            # Text-only brands (empty catalog folder) cannot win.
+            if n_refs <= 0:
+                eligible.pop(brand, None)
+                continue
+            if n_refs == 1:
+                floor = self.single_ref_image_floor
+            elif n_refs < self.sparse_ref_limit:
+                floor = self.sparse_image_floor
+            else:
+                floor = self.min_image_floor
+            if img_scores.get(brand, 0.0) < floor:
+                eligible.pop(brand, None)
+
+        if not eligible:
+            return BrandPrediction(
+                "unknown", float(ranked_all[0][1]), alternatives=alternatives
+            )
+
+        ranked = sorted(eligible.items(), key=lambda kv: kv[1], reverse=True)
         best_brand, best_score = ranked[0]
         second = ranked[1][1] if len(ranked) > 1 else -1.0
+        gap = best_score - second
+        img_s = img_scores.get(best_brand, 0.0)
+        refs = self.brand_embeddings.get(best_brand)
+        n_refs = 0 if refs is None else int(refs.shape[0])
+        sparse = n_refs > 0 and n_refs < self.sparse_ref_limit
+        need_margin = self.sparse_margin if sparse else self.margin
+        need_score = self.threshold
+        if sparse:
+            floor = (
+                self.single_ref_image_floor
+                if n_refs == 1
+                else self.sparse_image_floor
+            )
+            need_score = max(need_score, floor * 0.85)
         # Extra bar for luzhanska: need a strong visual match to catalog blues.
         if best_brand == "luzhanska":
-            img_s = img_scores.get("luzhanska", 0.0)
-            if img_s < 0.45 or (best_score - second) < max(self.margin, 0.03):
+            if img_s < 0.45 or gap < max(need_margin, 0.03):
                 return BrandPrediction(
                     "unknown", float(best_score), alternatives=alternatives
                 )
-        if best_score < self.threshold or (best_score - second) < self.margin:
+        if best_score < need_score or gap < need_margin:
             return BrandPrediction(
                 "unknown", float(best_score), alternatives=alternatives
             )

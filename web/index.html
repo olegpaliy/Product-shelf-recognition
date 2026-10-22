@@ -4,13 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>ХО · Image Recognition</title>
-  <link rel="stylesheet" href="/styles.css?v=brand-correct" />
+  <link rel="stylesheet" href="/styles.css?v=category-eva" />
 </head>
 <body>
   <div class="app-shell nav-hidden">
     <aside class="side-nav" aria-label="Модулі">
       <button type="button" class="nav-item active" data-nav="planogram" data-target="panel-cooler" disabled>
-        Планограма ХО
+        Планограма
       </button>
       <button type="button" class="nav-item" data-nav="visits" data-target="panel-qa" disabled>
         Розрахунок % візитів з фото і валідних фото
@@ -32,8 +32,8 @@
     <main class="main">
       <header class="topbar">
         <div>
-          <p class="eyebrow">PoC · ХО / полиця</p>
-          <h1>Планограма ХО</h1>
+          <p class="eyebrow">PoC · полиця / ХО / Eva</p>
+          <h1>Планограма</h1>
         </div>
         <button id="btn-back" class="btn outline hidden" type="button">← Інше фото</button>
       </header>
@@ -41,6 +41,13 @@
       <section id="screen-upload" class="screen">
         <div class="card">
           <h2>Фото для аналізу</h2>
+          <div class="row category-row">
+            <label class="field-label" for="category-select">Категорія</label>
+            <select id="category-select" class="select">
+              <option value="drinks">Напої / ХО</option>
+              <option value="eva">Eva / beauty</option>
+            </select>
+          </div>
           <div class="row">
             <label class="btn primary">
               Обрати фото
@@ -148,6 +155,6 @@
       </section>
     </main>
   </div>
-  <script src="/app.js?v=brand-correct"></script>
+  <script src="/app.js?v=category-eva"></script>
 </body>
 </html>

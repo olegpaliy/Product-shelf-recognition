@@ -1,6 +1,7 @@
 const state = {
   file: null,
   sample: null,
+  category: "drinks",
   hasResult: false,
   result: null,
   selectedIndex: null,
@@ -12,11 +13,22 @@ const state = {
 const NAV_TITLES = {
   share: "Нумерична дистрибуція",
   details: "Нумерична дистрибуція (деталі)",
-  planogram: "Планограма ХО",
+  planogram: "Планограма",
   missing: "SKU не в планограмі",
   competitor: "Конкурент в ХО",
   visits: "Розрахунок % візитів з фото і валідних фото",
 };
+
+function inferCategoryFromSample(name) {
+  return String(name || "").toLowerCase().startsWith("eva_") ? "eva" : "drinks";
+}
+
+function setCategory(cat, { syncSelect = true } = {}) {
+  state.category = cat === "eva" ? "eva" : "drinks";
+  if (syncSelect && $("category-select")) {
+    $("category-select").value = state.category;
+  }
+}
 
 const RESULT_NAV = new Set(["share", "details", "missing", "competitor"]);
 
@@ -90,9 +102,11 @@ async function loadSamples() {
       state.file = null;
       $("file-input").value = "";
       $("upload-name").textContent = name;
+      setCategory(inferCategoryFromSample(name));
       root.querySelectorAll(".sample").forEach((el) => el.classList.remove("selected"));
       card.classList.add("selected");
       updateAnalyzeEnabled();
+      refreshCatalogSelect().catch(() => {});
     });
     root.appendChild(card);
   }
@@ -118,7 +132,12 @@ function setBusy(busy) {
 function analyzeQuery() {
   const params = new URLSearchParams();
   params.set("planogram", "auto");
+  params.set("category", state.category || "drinks");
   return params;
+}
+
+function catalogQuery() {
+  return `category=${encodeURIComponent(state.category || "drinks")}`;
 }
 
 function brandClass(brand, expectedSet, competitorSet) {
@@ -284,7 +303,7 @@ async function fillBrandSelect(brands) {
 
 async function refreshCatalogSelect() {
   try {
-    const res = await fetch("/api/catalog");
+    const res = await fetch(`/api/catalog?${catalogQuery()}`);
     if (!res.ok) throw new Error(await res.text());
     const data = await res.json();
     const brands = (data.brands || []).map((b) => b.brand);
@@ -502,7 +521,7 @@ async function saveCorrection() {
     const created = await fetch("/api/catalog/brands", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: brand }),
+      body: JSON.stringify({ name: brand, category: state.category }),
     });
     if (!created.ok) throw new Error(await created.text());
     const createdData = await created.json();
@@ -527,6 +546,7 @@ async function saveCorrection() {
       result_id: state.result.result_id,
       detection_index: state.selectedIndex,
       brand,
+      category: state.category,
       action,
     }),
   });
@@ -537,7 +557,8 @@ async function saveCorrection() {
   state.result.detections[idx].brand = data.brand;
   if (data.saved) {
     state.result.detections[idx].brand_confidence = 1;
-    setCorrectStatus(`Збережено в catalog/${data.brand}/`);
+    const catDir = state.category === "eva" ? "catalog_eva" : "catalog";
+    setCorrectStatus(`Збережено в ${catDir}/${data.brand}/`);
   } else {
     state.result.detections[idx].brand_confidence = 0;
     setCorrectStatus(`Позначено як ${data.brand}`);
@@ -549,7 +570,7 @@ async function saveCorrection() {
 
 async function reloadCatalogModel() {
   setCorrectStatus("Оновлення embeddings…");
-  const res = await fetch("/api/catalog/reload", { method: "POST" });
+  const res = await fetch(`/api/catalog/reload?${catalogQuery()}`, { method: "POST" });
   if (!res.ok) throw new Error(await res.text());
   const data = await res.json();
   await fillBrandSelect((data.brands || []).map((b) => b.brand));
@@ -577,6 +598,7 @@ async function analyze() {
       throw new Error(text || res.statusText);
     }
     const data = await res.json();
+    if (data.category) setCategory(data.category);
     renderResult(data);
   } catch (err) {
     showError(err.message || String(err));
@@ -584,6 +606,11 @@ async function analyze() {
     setBusy(false);
   }
 }
+
+$("category-select")?.addEventListener("change", (e) => {
+  setCategory(e.target.value, { syncSelect: false });
+  refreshCatalogSelect().catch(() => {});
+});
 
 $("file-input").addEventListener("change", (e) => {
   const file = e.target.files && e.target.files[0];

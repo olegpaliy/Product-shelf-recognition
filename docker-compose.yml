@@ -8,8 +8,10 @@ services:
       # Required for 1:1 quality — not in git; copy from a machine that already has them
       - ./models:/app/models:ro
       - ./out:/app/out
+      - ./samples:/app/samples:ro
       # UI-added brand references persist across rebuilds
       - ./catalog:/app/catalog
+      - ./catalog_eva:/app/catalog_eva
       # Persist SigLIP2 / HF downloads across restarts
       - hf_cache:/data/hf
       - ultralytics_cache:/data/ultralytics

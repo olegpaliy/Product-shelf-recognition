@@ -26,6 +26,7 @@ RUN pip install -r requirements.txt
 COPY poc/ poc/
 COPY web/ web/
 COPY catalog/ catalog/
+COPY catalog_eva/ catalog_eva/
 COPY samples/ samples/
 COPY planograms/ planograms/
 COPY scripts/docker_entrypoint.sh /entrypoint.sh

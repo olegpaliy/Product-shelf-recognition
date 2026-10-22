@@ -25,23 +25,47 @@ SAMPLES_DIR = ROOT / "samples"
 OUT_DIR = ROOT / "out"
 WEB_DIR = ROOT / "web"
 UPLOADS_DIR = OUT_DIR / "uploads"
-CATALOG_DIR = ROOT / "catalog"
+CATALOG_DIRS = {
+    "drinks": ROOT / "catalog",
+    "eva": ROOT / "catalog_eva",
+}
+DEFAULT_CATEGORY = "drinks"
 
-app = FastAPI(title="Shelf XO Recognition PoC", version="0.7.0")
-_matcher: Optional[BrandMatcher] = None
+app = FastAPI(title="Shelf XO Recognition PoC", version="0.8.0")
+_matchers: Dict[str, BrandMatcher] = {}
 _matcher_lock = threading.Lock()
 
 _BRAND_SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
-def get_matcher() -> BrandMatcher:
-    global _matcher
-    if _matcher is not None:
-        return _matcher
+def resolve_category(category: Optional[str] = None, *, sample: Optional[str] = None) -> str:
+    raw = (category or "").strip().lower()
+    if raw in CATALOG_DIRS:
+        return raw
+    if sample and sample.lower().startswith("eva_"):
+        return "eva"
+    return DEFAULT_CATEGORY
+
+
+def catalog_dir_for(category: str) -> Path:
+    path = CATALOG_DIRS.get(category)
+    if path is None:
+        raise HTTPException(400, f"Unknown category: {category}")
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def get_matcher(category: str = DEFAULT_CATEGORY) -> BrandMatcher:
+    cat = resolve_category(category)
+    cached = _matchers.get(cat)
+    if cached is not None:
+        return cached
     with _matcher_lock:
-        if _matcher is None:
-            _matcher = BrandMatcher(CATALOG_DIR)
-        return _matcher
+        cached = _matchers.get(cat)
+        if cached is None:
+            cached = BrandMatcher(catalog_dir_for(cat))
+            _matchers[cat] = cached
+        return cached
 
 
 def slugify_brand(name: str) -> str:
@@ -50,8 +74,8 @@ def slugify_brand(name: str) -> str:
     return slug
 
 
-def _catalog_image_count(brand: str) -> int:
-    brand_dir = CATALOG_DIR / brand
+def _catalog_image_count(brand: str, category: str = DEFAULT_CATEGORY) -> int:
+    brand_dir = catalog_dir_for(category) / brand
     if not brand_dir.is_dir():
         return 0
     return sum(
@@ -62,26 +86,29 @@ def _catalog_image_count(brand: str) -> int:
     )
 
 
-def _list_catalog_brands() -> List[Dict[str, Any]]:
-    CATALOG_DIR.mkdir(parents=True, exist_ok=True)
+def _list_catalog_brands(category: str = DEFAULT_CATEGORY) -> List[Dict[str, Any]]:
+    cat = resolve_category(category)
+    root = catalog_dir_for(cat)
     disk = {
         p.name
-        for p in CATALOG_DIR.iterdir()
+        for p in root.iterdir()
         if p.is_dir() and not p.name.startswith(".")
     }
-    matcher_brands = set(get_matcher().brands)
+    matcher_brands = set(get_matcher(cat).brands)
     names = sorted(disk | matcher_brands)
-    return [{"brand": b, "image_count": _catalog_image_count(b)} for b in names]
+    return [{"brand": b, "image_count": _catalog_image_count(b, cat)} for b in names]
 
 
 class CreateBrandBody(BaseModel):
     name: str = Field(..., min_length=1, max_length=64)
+    category: str = Field(default=DEFAULT_CATEGORY)
 
 
 class CatalogReferenceBody(BaseModel):
     result_id: str
     detection_index: int = Field(..., ge=0)
     brand: str = Field(..., min_length=1, max_length=64)
+    category: str = Field(default=DEFAULT_CATEGORY)
     action: str = Field(
         default="save",
         description="save | confirm | unknown | not_product",
@@ -93,13 +120,26 @@ def live():
     return {"ok": True}
 
 
+@app.get("/api/categories")
+def list_categories():
+    return {
+        "default": DEFAULT_CATEGORY,
+        "categories": [
+            {"id": "drinks", "label": "Напої / ХО", "catalog": str(CATALOG_DIRS["drinks"].name)},
+            {"id": "eva", "label": "Eva / beauty", "catalog": str(CATALOG_DIRS["eva"].name)},
+        ],
+    }
+
+
 @app.get("/api/health")
-def health():
-    matcher = get_matcher()
+def health(category: str = Query(DEFAULT_CATEGORY)):
+    cat = resolve_category(category)
+    matcher = get_matcher(cat)
     weights = default_detector_weights()
     return {
+        "category": cat,
         "ok": True,
-        "version": "0.7.0",
+        "version": "0.8.0",
         "detector": "sku110k",
         "detector_weights": weights,
         "detector_device": detect_device(),
@@ -107,6 +147,7 @@ def health():
         "brand_model": BRAND_MODEL,
         "brand_device": matcher.device,
         "catalog_brands": matcher.brands,
+        "catalog_dir": str(catalog_dir_for(cat).relative_to(ROOT)),
     }
 
 
@@ -137,25 +178,32 @@ def get_sample(name: str):
 
 
 @app.get("/api/catalog")
-def list_catalog():
-    return {"brands": _list_catalog_brands()}
+def list_catalog(category: str = Query(DEFAULT_CATEGORY)):
+    cat = resolve_category(category)
+    return {"category": cat, "brands": _list_catalog_brands(cat)}
 
 
 @app.post("/api/catalog/brands")
 def create_brand(body: CreateBrandBody):
+    cat = resolve_category(body.category)
     slug = slugify_brand(body.name)
     if not slug or not _BRAND_SLUG_RE.match(slug):
         raise HTTPException(400, "Invalid brand name (use letters, numbers, hyphens)")
-    brand_dir = CATALOG_DIR / slug
+    brand_dir = catalog_dir_for(cat) / slug
     brand_dir.mkdir(parents=True, exist_ok=True)
-    return {"brand": slug, "image_count": _catalog_image_count(slug)}
+    return {
+        "brand": slug,
+        "category": cat,
+        "image_count": _catalog_image_count(slug, cat),
+    }
 
 
 @app.post("/api/catalog/reload")
-def reload_catalog():
-    matcher = get_matcher()
+def reload_catalog(category: str = Query(DEFAULT_CATEGORY)):
+    cat = resolve_category(category)
+    matcher = get_matcher(cat)
     matcher.reload_catalog()
-    return {"ok": True, "brands": _list_catalog_brands()}
+    return {"ok": True, "category": cat, "brands": _list_catalog_brands(cat)}
 
 
 @app.post("/api/catalog/references")
@@ -170,6 +218,10 @@ def add_catalog_reference(body: CatalogReferenceBody):
         raise HTTPException(404, "Result not found (missing report or source)")
 
     report = json.loads(report_path.read_text(encoding="utf-8"))
+    cat = resolve_category(
+        body.category or report.get("category"),
+        sample=report.get("image"),
+    )
     detections = report.get("detections") or []
     idx = body.detection_index
     if idx >= len(detections):
@@ -190,6 +242,7 @@ def add_catalog_reference(body: CatalogReferenceBody):
             "ok": True,
             "saved": False,
             "brand": label,
+            "category": cat,
             "detection_index": idx,
         }
 
@@ -211,14 +264,14 @@ def add_catalog_reference(body: CatalogReferenceBody):
         raise HTTPException(400, "Crop too small")
     crop = image[y1:y2, x1:x2]
 
-    brand_dir = CATALOG_DIR / slug
+    brand_dir = catalog_dir_for(cat) / slug
     brand_dir.mkdir(parents=True, exist_ok=True)
     out_name = f"ref_{rid}_{idx}.jpg"
     out_path = brand_dir / out_name
     if not cv2.imwrite(str(out_path), crop):
         raise HTTPException(500, "Failed to write catalog crop")
 
-    matcher = get_matcher()
+    matcher = get_matcher(cat)
     was_new = slug not in matcher.brand_embeddings
     try:
         matcher.add_reference(slug, crop)
@@ -233,6 +286,7 @@ def add_catalog_reference(body: CatalogReferenceBody):
     det["feedback"] = "save" if action == "save" else action
     detections[idx] = det
     report["detections"] = detections
+    report["category"] = cat
     report["catalog_brands"] = matcher.brands
     write_json(report_path, report)
 
@@ -240,9 +294,10 @@ def add_catalog_reference(body: CatalogReferenceBody):
         "ok": True,
         "saved": True,
         "brand": slug,
+        "category": cat,
         "path": str(out_path.relative_to(ROOT)),
         "detection_index": idx,
-        "image_count": _catalog_image_count(slug),
+        "image_count": _catalog_image_count(slug, cat),
     }
 
 
@@ -250,6 +305,7 @@ def add_catalog_reference(body: CatalogReferenceBody):
 async def analyze(
     file: Optional[UploadFile] = File(None),
     sample: Optional[str] = Query(None),
+    category: Optional[str] = Query(None),
     planogram: str = Query("auto"),
     expected: Optional[str] = Query(
         None,
@@ -262,6 +318,7 @@ async def analyze(
     UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
     rid = uuid.uuid4().hex[:12]
     expected_brands = [x.strip() for x in (expected or "").split(",") if x.strip()]
+    cat = resolve_category(category, sample=sample)
 
     if sample:
         src = SAMPLES_DIR / sample
@@ -279,13 +336,15 @@ async def analyze(
             image_path,
             OUT_DIR,
             result_id=rid,
-            matcher=get_matcher(),
+            catalog_dir=catalog_dir_for(cat),
+            matcher=get_matcher(cat),
             planogram_mode=planogram,
             expected_brands=expected_brands or None,
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(500, str(exc)) from exc
 
+    payload["category"] = cat
     payload["annotated_url"] = f"/api/results/{rid}/annotated.jpg"
     payload["source_url"] = f"/api/results/{rid}/source.jpg"
     payload["json_url"] = f"/api/results/{rid}/report.json"
