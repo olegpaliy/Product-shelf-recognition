@@ -46,6 +46,24 @@ TEXT_PROMPTS: Dict[str, List[str]] = {
         "SAN BENEDETTO light blue label with bird logo Product of Italy",
     ],
     "voda": ["clear water bottle with vertical white VODA text label"],
+    "galicia": [
+        "Galicia Ukrainian juice carton beige packaging with fruit photo",
+        "галіція сік tetra pak carton tomato apple juice",
+        "Galicia juice box cream cardboard with Galicia logo Cyrillic Галіція",
+        "Ukrainian Galicia brand fruit juice carton on supermarket shelf",
+    ],
+    "sandora": [
+        "Sandora blue juice carton Ukrainian soft drink",
+        "сандора blue tetra pak juice carton",
+    ],
+    "sadochok": [
+        "Sadochok green juice carton with hedgehog mascot",
+        "садочок green apple juice carton Ukrainian",
+    ],
+    "cappy": [
+        "Cappy juice carton white packaging fruit juice",
+        "Cappy Pulpy juice bottle",
+    ],
 }
 
 DEFAULT_MODEL = "google/siglip2-so400m-patch16-256"
@@ -74,8 +92,8 @@ class BrandMatcher:
         catalog_dir: Path,
         *,
         # Stricter accept: prefer unknown over weak nearest-neighbor matches.
-        threshold: float = 0.28,
-        margin: float = 0.07,
+        threshold: float = 0.26,
+        margin: float = 0.03,
         sparse_ref_limit: int = 3,
         sparse_image_floor: float = 0.60,
         sparse_margin: float = 0.09,
@@ -83,8 +101,9 @@ class BrandMatcher:
         min_image_floor: float = 0.52,
         device: Optional[str] = None,
         model_id: str = DEFAULT_MODEL,
-        image_weight: float = 0.75,
-        text_weight: float = 0.25,
+        # Catalog photos beat weak text prototypes (juice brands look alike in text space).
+        image_weight: float = 0.9,
+        text_weight: float = 0.1,
         batch_size: int = 16,
     ) -> None:
         self.catalog_dir = Path(catalog_dir)
